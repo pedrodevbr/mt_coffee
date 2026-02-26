@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MT Coffee - Painel Admin</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <style>
+        .admin-dashboard {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+            width: 100%;
+            max-width: 800px;
+        }
+
+        @media (min-width: 768px) {
+            .admin-dashboard {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .admin-header,
+            .table-container {
+                grid-column: span 2;
+            }
+        }
+
+        .admin-card {
+            padding: 20px;
+            border-radius: 16px;
+        }
+
+        .table-container {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            color: #fff;
+        }
+
+        th,
+        td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        th {
+            background: rgba(255, 255, 255, 0.05);
+            font-weight: 500;
+        }
+
+        tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .stock-display {
+            font-size: 2rem;
+            font-weight: 700;
+            margin: 10px 0;
+            color: var(--primary-color);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="background-animation">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <main class="container glass-panel" style="max-width: 900px; margin: 40px auto; padding: 30px;">
+        <header class="header admin-header">
+            <h1 class="logo">MT <span>Coffee</span> Admin</h1>
+            <p class="subtitle">Gestão de Estoque e Usuários</p>
+        </header>
+
+        <div class="admin-dashboard">
+            <!-- Stock Card -->
+            <div class="glass-panel admin-card">
+                <h3>Visão de Estoque</h3>
+                <div class="stock-display" id="admin-current-stock">-- g</div>
+                <p>Preço Calculado por Dose (10g): <strong id="admin-dose-price">R$ --</strong></p>
+                <hr style="border-color: rgba(255,255,255,0.1); margin: 15px 0;">
+
+                <h4>Adicionar Remessa</h4>
+                <div class="input-group small">
+                    <input type="number" id="add-grams" placeholder=" ">
+                    <label for="add-grams">Qtd em Gramas (Ex: 1000)</label>
+                </div>
+                <div class="input-group small">
+                    <input type="number" id="add-cost" placeholder=" " step="0.01">
+                    <label for="add-cost">Custo Total (R$)</label>
+                </div>
+                <button class="btn btn-primary" id="btn-add-stock" style="margin-top: 10px;">Adicionar ao
+                    Estoque</button>
+                <p id="stock-msg" class="action-msg"></p>
+            </div>
+
+            <!-- QR Code Card -->
+            <div class="glass-panel admin-card">
+                <h3>QR Code PIX</h3>
+                <p style="margin-bottom: 10px;">Faça o upload do QR Code para recebimento das recargas de saldo.</p>
+
+                <div class="qr-container" style="margin: 0 auto 15px auto;">
+                    <img id="admin-qr-preview" src="" alt="QR Atual" style="max-width: 150px; border-radius: 8px;">
+                </div>
+
+                <div class="input-group small">
+                    <input type="file" id="qr-file" accept="image/*" style="padding: 10px 0;">
+                </div>
+                <button class="btn btn-secondary" id="btn-upload-qr" style="margin-top: 10px;">Salvar QR Code</button>
+                <p id="qr-msg" class="action-msg"></p>
+            </div>
+
+            <!-- Users Manager -->
+            <div class="glass-panel admin-card table-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3>Gestão de Usuários</h3>
+                    <button class="btn btn-outline" id="btn-new-user" style="padding: 5px 15px; font-size: 0.9em;">+
+                        Novo Usuário</button>
+                </div>
+                <table id="users-table">
+                    <thead>
+                        <tr>
+                            <th>Nome</th>
+                            <th>Matrícula</th>
+                            <th>Saldo</th>
+                            <th>Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody id="users-tbody">
+                        <tr>
+                            <td colspan="4" style="text-align:center;">Carregando...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Global History Manager -->
+            <div class="glass-panel admin-card table-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3>Histórico Global de Transações</h3>
+                </div>
+                <table id="history-table">
+                    <thead>
+                        <tr>
+                            <th>Data/Hora</th>
+                            <th>Usuário</th>
+                            <th>Matrícula</th>
+                            <th>Tipo</th>
+                            <th>Valor</th>
+                        </tr>
+                    </thead>
+                    <tbody id="history-tbody">
+                        <tr>
+                            <td colspan="5" style="text-align:center;">Carregando...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 30px;">
+            <a href="/" class="btn btn-outline" style="text-decoration: none;">Ir para a Página Principal</a>
+        </div>
+    </main>
+
+    <!-- New User Modal -->
+    <div class="modal hidden" id="user-modal">
+        <div class="modal-content glass-panel">
+            <span class="close-btn" id="close-user-modal">&times;</span>
+            <h2>Novo Usuário</h2>
+
+            <div class="input-group small">
+                <input type="text" id="new-user-name" placeholder=" ">
+                <label for="new-user-name">Nome Completo</label>
+            </div>
+            <div class="input-group small">
+                <input type="text" id="new-user-matricula" placeholder=" ">
+                <label for="new-user-matricula">Matrícula (Ex: 12345)</label>
+            </div>
+
+            <button class="btn btn-primary" id="btn-save-user">Cadastrar Usuário</button>
+            <p id="user-msg" class="action-msg"></p>
+        </div>
+    </div>
+
+    <script src="js/admin.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,5 @@
+node_modules
+*.sqlite
+error.log
+public/assets/qr_code.*
+.env

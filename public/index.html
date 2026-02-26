@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MT Coffee - Sistema Inteligente de Consumo</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+    <!-- Animated Background -->
+    <div class="background-animation">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="container glass-panel">
+        <header class="header">
+            <h1 class="logo">MT <span>Coffee</span> ☕</h1>
+            <p class="subtitle">O seu café inteligente e prático.</p>
+        </header>
+
+        <!-- Dynamic Stock Indicator -->
+        <div class="stock-container">
+            <div class="stock-info">
+                <span>Estoque Atual: <strong id="stock-level">-- g</strong></span>
+                <span>Preço/Dose: <strong id="dose-price">R$ --</strong></span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" id="stock-progress"></div>
+            </div>
+        </div>
+
+        <!-- Login / Identify Section -->
+        <section class="auth-section" id="auth-section">
+            <div id="login-form">
+                <div class="input-group">
+                    <input type="text" id="matricula-input" placeholder=" " required autocomplete="off">
+                    <label for="matricula-input">Digite sua Matrícula</label>
+                </div>
+                <button class="btn btn-primary" id="btn-login">Entrar</button>
+                <div style="text-align: center; margin-top: 15px;">
+                    <a href="#" id="link-show-register"
+                        style="color: var(--primary-color); text-decoration: none; font-size: 0.9rem;">Não tem cadastro?
+                        Registre-se</a>
+                </div>
+            </div>
+
+            <div id="register-form" class="hidden">
+                <h3 style="margin-bottom: 20px; text-align: center;">Novo Cadastro</h3>
+                <div class="input-group">
+                    <input type="text" id="reg-name-input" placeholder=" " required autocomplete="off">
+                    <label for="reg-name-input">Nome Completo</label>
+                </div>
+                <div class="input-group">
+                    <input type="text" id="reg-matricula-input" placeholder=" " required autocomplete="off">
+                    <label for="reg-matricula-input">Sua Matrícula</label>
+                </div>
+                <button class="btn btn-primary" id="btn-register">Cadastrar</button>
+                <div style="text-align: center; margin-top: 15px;">
+                    <a href="#" id="link-show-login"
+                        style="color: var(--text-muted); text-decoration: none; font-size: 0.9rem;">Voltar para o
+                        Login</a>
+                </div>
+            </div>
+
+            <p id="auth-error" class="error-msg"></p>
+            <p id="auth-success" class="action-msg"></p>
+        </section>
+
+        <!-- User Dashboard Section (Hidden by default) -->
+        <section class="user-dashboard hidden" id="user-dashboard">
+            <div class="user-profile">
+                <div class="greeting">Olá, <span id="user-name">Usuário</span> 👋</div>
+                <div class="balance-card">
+                    <h3>Seu Saldo</h3>
+                    <div class="balance-amount" id="user-balance">R$ 0,00</div>
+                </div>
+            </div>
+
+            <div class="actions">
+                <button class="btn btn-consume" id="btn-consume">
+                    <span class="icon">☕</span> Pegar um Café
+                </button>
+                <div style="display: flex; gap: 10px; width: 100%;">
+                    <button class="btn btn-secondary" id="btn-show-recharge" style="flex: 1;">
+                        <span class="icon">💳</span> Recarregar
+                    </button>
+                    <button class="btn btn-secondary" id="btn-show-history" style="flex: 1;">
+                        <span class="icon">📜</span> Histórico
+                    </button>
+                </div>
+                <button class="btn btn-outline" id="btn-logout">Sair</button>
+            </div>
+
+            <div id="history-container" class="hidden"
+                style="margin-top: 20px; text-align: left; background: rgba(0,0,0,0.2); border-radius: 12px; padding: 15px; max-height: 200px; overflow-y: auto;">
+                <h4
+                    style="margin-bottom: 10px; font-size: 0.9rem; color: var(--text-muted); text-transform: uppercase;">
+                    Últimas Transações</h4>
+                <ul id="history-list" style="list-style: none; padding: 0; font-size: 0.9rem;">
+                    <!-- JS fills this -->
+                </ul>
+            </div>
+            <p id="action-message" class="action-msg"></p>
+        </section>
+
+    </main>
+
+    <!-- Recharge Modal -->
+    <div class="modal hidden" id="recharge-modal">
+        <div class="modal-content glass-panel">
+            <span class="close-btn" id="close-modal">&times;</span>
+            <h2>Recarregar Saldo</h2>
+            <p class="modal-desc">Escaneie o QR Code abaixo com o aplicativo do seu banco para pagar via PIX.</p>
+
+            <div class="qr-container">
+                <img id="pix-qr" src="/assets/qr_placeholder.png" alt="PIX QR Code"
+                    onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'200\' height=\'200\'><rect width=\'200\' height=\'200\' fill=\'%23333\'/><text x=\'50%\' y=\'50%\' fill=\'white\' font-family=\'sans-serif\' font-size=\'14\' text-anchor=\'middle\' dominant-baseline=\'middle\'>Sem QR Cadastrado</text></svg>'">
+            </div>
+
+            <div class="input-group small">
+                <input type="number" id="recharge-amount" placeholder=" " step="0.01" min="0.01">
+                <label for="recharge-amount">Valor Transferido (R$)</label>
+            </div>
+
+            <button class="btn btn-primary" id="btn-confirm-recharge">Confirmar Recarga</button>
+        </div>
+    </div>
+
+    <!-- Admin Link -->
+    <a href="/admin.html" class="admin-link">⚙️ Painel Admin</a>
+
+    <script src="js/main.js"></script>
+</body>
+
+</html>
