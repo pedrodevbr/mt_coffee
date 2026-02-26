@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const API_URL = 'http://localhost:3000/api';
+    const API_URL = '/api'; // Use relative path so it defaults to the current domain
 
     // Elements
     const adminCurrentStock = document.getElementById('admin-current-stock');
