@@ -122,9 +122,12 @@ app.get('/api/users/:matricula', (req, res) => {
 
 app.post('/api/users', (req, res) => {
     const { name, matricula, balance } = req.body;
+    if (matricula === '0000') {
+        return res.status(400).json({ error: 'Matrícula reservada para administração.' });
+    }
     db.run('INSERT INTO users (name, matricula, balance) VALUES (?, ?, ?)',
         [name, matricula, balance || 0], function (err) {
-            if (err) return res.status(400).json({ error: err.message }); // likely unique constraint
+            if (err) return res.status(400).json({ error: err.message });
             res.status(201).json({ id: this.lastID, name, matricula, balance: balance || 0 });
         });
 });

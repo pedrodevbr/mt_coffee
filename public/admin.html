@@ -176,7 +176,8 @@
     <div class="modal hidden" id="user-modal">
         <div class="modal-content glass-panel">
             <span class="close-btn" id="close-user-modal">&times;</span>
-            <h2>Novo Usuário</h2>
+            <h2 id="user-modal-title">Novo Usuário</h2>
+            <input type="hidden" id="edit-user-id" value="">
 
             <div class="input-group small">
                 <input type="text" id="new-user-name" placeholder=" ">
@@ -185,6 +186,10 @@
             <div class="input-group small">
                 <input type="text" id="new-user-matricula" placeholder=" ">
                 <label for="new-user-matricula">Matrícula (Ex: 12345)</label>
+            </div>
+            <div class="input-group small">
+                <input type="number" id="new-user-balance" placeholder=" " step="0.01" value="0">
+                <label for="new-user-balance">Saldo (R$)</label>
             </div>
 
             <button class="btn btn-primary" id="btn-save-user">Cadastrar Usuário</button>

@@ -144,6 +144,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch(`${API_URL}/users/${matricula}`);
             if (res.ok) {
                 const user = await res.json();
+                if (user.matricula === '0000') {
+                    window.location.href = '/admin.html';
+                    return;
+                }
                 currentUser = user;
                 showDashboard();
             } else {
