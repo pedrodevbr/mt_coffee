@@ -13,7 +13,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnLogin = document.getElementById('btn-login');
     const authError = document.getElementById('auth-error');
 
-    // Auth Toggles & Registration
     const loginForm = document.getElementById('login-form');
     const registerForm = document.getElementById('register-form');
     const linkShowRegister = document.getElementById('link-show-register');
@@ -40,6 +39,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const rechargeModal = document.getElementById('recharge-modal');
     const closeModalBtn = document.getElementById('close-modal');
     const pixQr = document.getElementById('pix-qr');
+    const pixKeyDisplay = document.getElementById('pix-key-display');
+    const pixKeyValue = document.getElementById('pix-key-value');
+    const btnDownloadQr = document.getElementById('btn-download-qr');
+    const downloadQrContainer = document.getElementById('download-qr-container');
     const rechargeAmount = document.getElementById('recharge-amount');
     const btnConfirmRecharge = document.getElementById('btn-confirm-recharge');
 
@@ -69,12 +72,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     btnRegister.addEventListener('click', handleRegister);
-
     btnLogout.addEventListener('click', handleLogout);
-
     btnConsume.addEventListener('click', handleConsume);
 
-    // Modal Listeners
     btnShowRecharge.addEventListener('click', () => {
         rechargeAmount.value = '';
         rechargeModal.classList.remove('hidden');
@@ -85,8 +85,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     btnConfirmRecharge.addEventListener('click', handleRecharge);
-
-    // History Listeners
     btnShowHistory.addEventListener('click', handleToggleHistory);
 
     // Functions
@@ -108,14 +106,11 @@ document.addEventListener('DOMContentLoaded', () => {
         stockLevel.textContent = `${systemState.coffee_stock_grams.toFixed(0)} g`;
         dosePrice.textContent = `R$ ${systemState.current_price_per_dose.toFixed(2).replace('.', ',')}`;
 
-        // Progress bar (Assuming max capacity is 2000g for visual purposes, adjust as needed)
         const maxCapacity = 2000;
         let percentage = (systemState.coffee_stock_grams / maxCapacity) * 100;
         if (percentage > 100) percentage = 100;
-
         stockProgress.style.width = `${percentage}%`;
 
-        // Change color based on stock
         if (percentage < 20) {
             stockProgress.style.background = 'var(--danger)';
         } else if (percentage < 50) {
@@ -124,9 +119,19 @@ document.addEventListener('DOMContentLoaded', () => {
             stockProgress.style.background = 'var(--success)';
         }
 
-        // Update QR
         if (systemState.qr_code_url) {
             pixQr.src = systemState.qr_code_url;
+            btnDownloadQr.href = systemState.qr_code_url;
+            downloadQrContainer.style.display = 'block';
+        } else {
+            downloadQrContainer.style.display = 'none';
+        }
+
+        if (systemState.pix_key) {
+            pixKeyValue.textContent = systemState.pix_key;
+            pixKeyDisplay.style.display = 'block';
+        } else {
+            pixKeyDisplay.style.display = 'none';
         }
     }
 
@@ -136,16 +141,12 @@ document.addEventListener('DOMContentLoaded', () => {
             showAuthError('Por favor, informe a matrícula.');
             return;
         }
-
         if (matricula === '0000') {
-            console.log('Admin login detected, redirecting...');
             window.location.href = '/admin.html';
             return;
         }
-
         btnLogin.textContent = 'Carregando...';
         btnLogin.disabled = true;
-
         try {
             const res = await fetch(`${API_URL}/users/${matricula}`);
             if (res.ok) {
@@ -166,32 +167,26 @@ document.addEventListener('DOMContentLoaded', () => {
     async function handleRegister() {
         const name = regNameInput.value.trim();
         const matricula = regMatriculaInput.value.trim();
-
         if (!name || !matricula) {
             showAuthError('Preencha nome e matrícula.');
             return;
         }
-
         btnRegister.disabled = true;
         btnRegister.textContent = 'Aguarde...';
-
         try {
             const res = await fetch(`${API_URL}/users`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, matricula, balance: 0 })
             });
-
-            const data = await res.json();
             if (res.ok) {
                 authSuccess.textContent = 'Cadastro realizado! Faça login.';
                 regNameInput.value = '';
                 regMatriculaInput.value = '';
-                setTimeout(() => {
-                    linkShowLogin.click();
-                }, 2000);
+                setTimeout(() => { linkShowLogin.click(); }, 2000);
             } else {
-                showAuthError(data.error || 'Erro ao cadastrar. Matrícula já existe?');
+                const data = await res.json();
+                showAuthError(data.error || 'Erro ao cadastrar.');
             }
         } catch (error) {
             showAuthError('Erro de conexão.');
@@ -213,20 +208,14 @@ document.addEventListener('DOMContentLoaded', () => {
     function showDashboard() {
         authSection.classList.add('hidden');
         userDashboard.classList.remove('hidden');
-
-        userNameEl.textContent = currentUser.name.split(' ')[0]; // First name
+        userNameEl.textContent = currentUser.name.split(' ')[0];
         updateBalanceUI();
-        fetchSystemState(); // Refresh stock
+        fetchSystemState();
     }
 
     function updateBalanceUI() {
         userBalanceEl.textContent = `R$ ${currentUser.balance.toFixed(2).replace('.', ',')}`;
-        // Color based on balance
-        if (currentUser.balance < 0) {
-            userBalanceEl.style.color = 'var(--danger)';
-        } else {
-            userBalanceEl.style.color = 'var(--primary-color)';
-        }
+        userBalanceEl.style.color = currentUser.balance < 0 ? 'var(--danger)' : 'var(--primary-color)';
     }
 
     function showAuthError(msg) {
@@ -242,36 +231,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function handleConsume() {
         if (!currentUser) return;
-
-        // Check if there's enough stock for 1 dose
         if (systemState && systemState.coffee_stock_grams < systemState.dose_grams) {
             showActionMsg('Estoque de café insuficiente!', true);
             return;
         }
-
         btnConsume.disabled = true;
         const originalText = btnConsume.innerHTML;
         btnConsume.innerHTML = '<span class="icon">⏳</span> Preparando...';
-
         try {
             const res = await fetch(`${API_URL}/consume`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ matricula: currentUser.matricula })
             });
-
             const data = await res.json();
-
             if (res.ok) {
                 currentUser.balance = data.new_balance;
                 updateBalanceUI();
                 showActionMsg(`Café consumido! Débito de R$ ${data.cost.toFixed(2).replace('.', ',')}`);
-                fetchSystemState(); // update stock visually
-                if (!historyContainer.classList.contains('hidden')) {
-                    loadHistory();
-                }
-
-                // Success animation
+                fetchSystemState();
+                if (!historyContainer.classList.contains('hidden')) loadHistory();
                 btnConsume.innerHTML = '<span class="icon">✓</span> Aproveite!';
                 setTimeout(() => {
                     btnConsume.innerHTML = originalText;
@@ -295,27 +274,21 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Por favor, insira um valor válido de recarga.');
             return;
         }
-
         btnConfirmRecharge.disabled = true;
         btnConfirmRecharge.textContent = 'Processando...';
-
         try {
             const res = await fetch(`${API_URL}/recharge`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ matricula: currentUser.matricula, amount: amount })
             });
-
             const data = await res.json();
-
             if (res.ok) {
                 currentUser.balance = data.new_balance;
                 updateBalanceUI();
                 rechargeModal.classList.add('hidden');
                 showActionMsg(`Recarga de R$ ${amount.toFixed(2).replace('.', ',')} confirmada!`);
-                if (!historyContainer.classList.contains('hidden')) {
-                    loadHistory();
-                }
+                if (!historyContainer.classList.contains('hidden')) loadHistory();
             } else {
                 alert(data.error || 'Erro ao processar recarga');
             }
@@ -338,9 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function loadHistory() {
         if (!currentUser) return;
-
         historyList.innerHTML = '<li>Carregando...</li>';
-
         try {
             const res = await fetch(`${API_URL}/transactions/${currentUser.matricula}`);
             if (res.ok) {
@@ -360,20 +331,17 @@ document.addEventListener('DOMContentLoaded', () => {
             historyList.innerHTML = '<li>Nenhuma transação encontrada.</li>';
             return;
         }
-
         transactions.forEach(t => {
             const li = document.createElement('li');
             li.style.marginBottom = '8px';
             li.style.paddingBottom = '8px';
             li.style.borderBottom = '1px solid rgba(255,255,255,0.1)';
-
             const date = new Date(t.timestamp).toLocaleString('pt-BR');
             const isRecharge = t.type === 'recharge';
             const color = isRecharge ? 'var(--success)' : '#fff';
             const sign = isRecharge ? '+' : '-';
             const amountStr = Math.abs(t.amount).toFixed(2).replace('.', ',');
             const icon = isRecharge ? '💳' : '☕';
-
             li.innerHTML = `
                 <div style="display: flex; justify-content: space-between; margin-bottom: 2px;">
                     <span>${icon} ${isRecharge ? 'Recarga' : 'Consumo'}</span>
@@ -384,5 +352,4 @@ document.addEventListener('DOMContentLoaded', () => {
             historyList.appendChild(li);
         });
     }
-
 });

@@ -116,11 +116,20 @@
         <div class="modal-content glass-panel">
             <span class="close-btn" id="close-modal">&times;</span>
             <h2>Recarregar Saldo</h2>
-            <p class="modal-desc">Escaneie o QR Code abaixo com o aplicativo do seu banco para pagar via PIX.</p>
+            <p class="modal-desc">Escaneie o QR Code abaixo ou utilize a chave PIX para realizar o pagamento.</p>
+
+            <div id="pix-key-display" style="text-align: center; margin-bottom: 15px; background: rgba(255,255,255,0.1); padding: 10px; border-radius: 8px; display: none;">
+                <span style="font-size: 0.8rem; color: var(--text-muted); display: block;">Chave PIX:</span>
+                <strong id="pix-key-value" style="word-break: break-all;"></strong>
+            </div>
 
             <div class="qr-container">
                 <img id="pix-qr" src="/assets/qr_placeholder.png" alt="PIX QR Code"
                     onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'200\' height=\'200\'><rect width=\'200\' height=\'200\' fill=\'%23333\'/><text x=\'50%\' y=\'50%\' fill=\'white\' font-family=\'sans-serif\' font-size=\'14\' text-anchor=\'middle\' dominant-baseline=\'middle\'>Sem QR Cadastrado</text></svg>'">
+            </div>
+
+            <div id="download-qr-container" style="text-align: center; margin-bottom: 15px; display: none;">
+                <a id="btn-download-qr" class="btn btn-outline" style="font-size: 0.8rem; padding: 5px 15px; text-decoration: none;" download="pix-qr-coffee.png" target="_blank">Baixar QR Code</a>
             </div>
 
             <div class="input-group small">

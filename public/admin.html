@@ -103,10 +103,16 @@
                 <p id="stock-msg" class="action-msg"></p>
             </div>
 
-            <!-- QR Code Card -->
+            <!-- PIX/QR Card -->
             <div class="glass-panel admin-card">
-                <h3>QR Code PIX</h3>
-                <p style="margin-bottom: 10px;">Faça o upload do QR Code para recebimento das recargas de saldo.</p>
+                <h3>Pagamento PIX</h3>
+                <p style="margin-bottom: 10px;">Configure os dados para recebimento das recargas.</p>
+
+                <div class="input-group small">
+                    <input type="text" id="pix-key-input" placeholder=" ">
+                    <label for="pix-key-input">Chave PIX (E-mail, CPF, Celular...)</label>
+                </div>
+                <button class="btn btn-primary" id="btn-save-pix" style="margin-bottom: 20px; width: 100%;">Salvar Chave PIX</button>
 
                 <div class="qr-container" style="margin: 0 auto 15px auto;">
                     <img id="admin-qr-preview" src="" alt="QR Atual" style="max-width: 150px; border-radius: 8px;">

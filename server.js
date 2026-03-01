@@ -38,7 +38,7 @@ app.get('/api/system', (req, res) => {
             if (err) return res.status(500).json({ error: err.message });
 
             const doseGrams = setting ? parseFloat(setting.value) : 10;
-            const stateObj = state || { coffee_stock_grams: 0, stock_total_cost: 0, qr_code_url: '' };
+            const stateObj = state || { coffee_stock_grams: 0, stock_total_cost: 0, qr_code_url: '', pix_key: '' };
 
             // Calculate dynamic price
             let currentPricePerDose = 0;
@@ -60,7 +60,6 @@ app.post('/api/system/stock', (req, res) => {
     const { added_grams, added_cost } = req.body;
     if (!added_grams || added_grams <= 0) return res.status(400).json({ error: "Invalid grams" });
 
-    // Add stock instead of replacing it, calculating the new average cost
     db.get('SELECT * FROM system_state ORDER BY id DESC LIMIT 1', (err, state) => {
         if (err) return res.status(500).json({ error: err.message });
 
@@ -77,23 +76,10 @@ app.post('/api/system/stock', (req, res) => {
     });
 });
 
-// Admin manual stock adjustment
-app.put('/api/system/stock', (req, res) => {
-    const { coffee_stock_grams, stock_total_cost } = req.body;
-    db.run('UPDATE system_state SET coffee_stock_grams = ?, stock_total_cost = ?',
-        [coffee_stock_grams, stock_total_cost], function (err) {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true, message: "Stock overridden successfully" });
-        });
-});
-
 app.post('/api/system/qr', upload.single('qr_image'), (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file uploaded' });
     }
-    // No matter where it's stored physically, the browser still gets it via /assets, 
-    // but Express static might need help if it's strictly outside the public folder.
-    // However, for this simple example, we are using Render Data disk just mapping straight through.
     const qrUrl = '/assets/' + req.file.filename;
     db.run('UPDATE system_state SET qr_code_url = ?', [qrUrl], function (err) {
         if (err) return res.status(500).json({ error: err.message });
@@ -101,7 +87,14 @@ app.post('/api/system/qr', upload.single('qr_image'), (req, res) => {
     });
 });
 
-// Since the data dir might be outside public, we serve the assets explicitly
+app.post('/api/system/pix', (req, res) => {
+    const { pix_key } = req.body;
+    db.run('UPDATE system_state SET pix_key = ?', [pix_key || ''], function (err) {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json({ success: true, message: 'Chave PIX atualizada' });
+    });
+});
+
 app.use('/assets', express.static(path.join(dataDir, 'assets')));
 
 // --- USERS ROUTES ---
@@ -122,15 +115,11 @@ app.get('/api/users/:matricula', (req, res) => {
 
 app.post('/api/users', (req, res) => {
     const { name, matricula, balance } = req.body;
-    
-    // Check if it's the admin matricula
     if (matricula === '0000') {
         db.get('SELECT * FROM users WHERE matricula = ?', ['0000'], (err, row) => {
             if (row) {
-                // If admin exists, don't allow re-registration
                 return res.status(400).json({ error: 'Matrícula reservada para administração.' });
             } else {
-                // If admin doesn't exist, allow creating it (initial setup)
                 db.run('INSERT INTO users (name, matricula, balance) VALUES (?, ?, ?)',
                     [name, matricula, balance || 0], function (err) {
                         if (err) return res.status(400).json({ error: err.message });
@@ -141,7 +130,6 @@ app.post('/api/users', (req, res) => {
         return;
     }
 
-    // Regular user registration
     db.run('INSERT INTO users (name, matricula, balance) VALUES (?, ?, ?)',
         [name, matricula, balance || 0], function (err) {
             if (err) return res.status(400).json({ error: err.message });
@@ -195,15 +183,6 @@ app.get('/api/transactions/:matricula', (req, res) => {
 
 app.post('/api/consume', (req, res) => {
     const { matricula } = req.body;
-
-    // Complex transaction flow:
-    // 1. Get User
-    // 2. Get System State & Price
-    // 3. Check if stock > dose
-    // 4. Create Transaction
-    // 5. Deduct Balance
-    // 6. Deduct Stock
-
     db.get('SELECT * FROM users WHERE matricula = ?', [matricula], (err, user) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!user) return res.status(404).json({ error: 'User not found' });
@@ -223,20 +202,13 @@ app.post('/api/consume', (req, res) => {
                 const costPerGram = state.stock_total_cost / state.coffee_stock_grams;
                 const pricePerDose = costPerGram * doseGrams;
 
-                // Update user balance
                 db.run('UPDATE users SET balance = balance - ? WHERE id = ?', [pricePerDose, user.id], (err) => {
                     if (err) return res.status(500).json({ error: err.message });
-
-                    // Create transaction
                     db.run('INSERT INTO transactions (user_id, amount, type) VALUES (?, ?, ?)', [user.id, -pricePerDose, 'consumption']);
-
-                    // Update stock
                     const newStock = state.coffee_stock_grams - doseGrams;
                     const newCost = state.stock_total_cost - pricePerDose;
-
                     db.run('UPDATE system_state SET coffee_stock_grams = ?, stock_total_cost = ?', [newStock, newCost], (err) => {
                         if (err) return res.status(500).json({ error: err.message });
-
                         res.json({
                             success: true,
                             message: 'Coffee consumed!',
@@ -252,20 +224,15 @@ app.post('/api/consume', (req, res) => {
 
 app.post('/api/recharge', (req, res) => {
     const { matricula, amount } = req.body;
-
     if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
 
     db.get('SELECT * FROM users WHERE matricula = ?', [matricula], (err, user) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!user) return res.status(404).json({ error: 'User not found' });
 
-        // Update balance
         db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [amount, user.id], (err) => {
             if (err) return res.status(500).json({ error: err.message });
-
-            // Create transaction
             db.run('INSERT INTO transactions (user_id, amount, type) VALUES (?, ?, ?)', [user.id, amount, 'recharge']);
-
             res.json({
                 success: true,
                 message: 'Balance recharged!',
@@ -275,7 +242,6 @@ app.post('/api/recharge', (req, res) => {
     });
 });
 
-// Fallback to index.html for undefined routes (useful if using frontend routing later, but sticking to static for now)
 app.use((req, res) => {
     if (req.accepts('html')) {
         res.sendFile(path.join(__dirname, 'public', 'index.html'));

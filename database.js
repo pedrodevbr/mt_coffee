@@ -39,13 +39,21 @@ function initSchema() {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             coffee_stock_grams REAL DEFAULT 0.0,
             stock_total_cost REAL DEFAULT 0.0,
-            qr_code_url TEXT DEFAULT ''
+            qr_code_url TEXT DEFAULT '',
+            pix_key TEXT DEFAULT ''
         )`);
+
+        // Migration: Ensure pix_key column exists
+        db.all("PRAGMA table_info(system_state)", (err, columns) => {
+            if (!err && columns && !columns.some(c => c.name === 'pix_key')) {
+                db.run("ALTER TABLE system_state ADD COLUMN pix_key TEXT DEFAULT ''");
+            }
+        });
 
         // Insert default system state if empty
         db.get(`SELECT COUNT(*) as count FROM system_state`, (err, row) => {
             if (row && row.count === 0) {
-                db.run(`INSERT INTO system_state (coffee_stock_grams, stock_total_cost, qr_code_url) VALUES (0, 0, '')`);
+                db.run(`INSERT INTO system_state (coffee_stock_grams, stock_total_cost, qr_code_url, pix_key) VALUES (0, 0, '', '')`);
             }
         });
 

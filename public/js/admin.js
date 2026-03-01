@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const API_URL = '/api'; // Use relative path so it defaults to the current domain
+    const API_URL = '/api';
 
     // Elements
     const adminCurrentStock = document.getElementById('admin-current-stock');
@@ -13,10 +13,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const qrFileInput = document.getElementById('qr-file');
     const btnUploadQr = document.getElementById('btn-upload-qr');
     const qrMsg = document.getElementById('qr-msg');
+    const pixKeyInput = document.getElementById('pix-key-input');
+    const btnSavePix = document.getElementById('btn-save-pix');
 
     const usersTbody = document.getElementById('users-tbody');
     const btnNewUser = document.getElementById('btn-new-user');
-
     const historyTbody = document.getElementById('history-tbody');
 
     // User Modal
@@ -38,8 +39,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Events
     btnAddStock.addEventListener('click', handleAddStock);
     btnUploadQr.addEventListener('click', handleUploadQr);
+    btnSavePix.addEventListener('click', handleSavePix);
 
-    // User Modal Events
     btnNewUser.addEventListener('click', () => {
         userModalTitle.textContent = 'Novo Usuário';
         editUserId.value = '';
@@ -56,7 +57,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     btnSaveUser.addEventListener('click', handleSaveUser);
 
-
     // Functions
     async function loadSystemState() {
         try {
@@ -68,9 +68,66 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (state.qr_code_url) {
                     qrPreview.src = state.qr_code_url;
                 }
+                if (state.pix_key) {
+                    pixKeyInput.value = state.pix_key;
+                }
             }
         } catch (error) {
             console.error('Error loading state:', error);
+        }
+    }
+
+    async function handleSavePix() {
+        const pix_key = pixKeyInput.value.trim();
+        btnSavePix.disabled = true;
+        btnSavePix.textContent = 'Salvando...';
+        try {
+            const res = await fetch(`${API_URL}/system/pix`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pix_key })
+            });
+            if (res.ok) {
+                showMessage(qrMsg, 'Chave PIX atualizada!');
+            } else {
+                showMessage(qrMsg, 'Erro ao salvar chave', true);
+            }
+        } catch (error) {
+            showMessage(qrMsg, 'Erro de conexão', true);
+        } finally {
+            btnSavePix.disabled = false;
+            btnSavePix.textContent = 'Salvar Chave PIX';
+        }
+    }
+
+    async function handleUploadQr() {
+        const file = qrFileInput.files[0];
+        if (!file) {
+            showMessage(qrMsg, 'Selecione uma imagem primeiro.', true);
+            return;
+        }
+        const formData = new FormData();
+        formData.append('qr_image', file);
+        btnUploadQr.disabled = true;
+        btnUploadQr.textContent = 'Enviando...';
+        try {
+            const res = await fetch(`${API_URL}/system/qr`, {
+                method: 'POST',
+                body: formData
+            });
+            if (res.ok) {
+                showMessage(qrMsg, 'QR Code salvo!');
+                qrFileInput.value = '';
+                loadSystemState();
+            } else {
+                const data = await res.json();
+                showMessage(qrMsg, data.error || 'Erro no upload', true);
+            }
+        } catch (error) {
+            showMessage(qrMsg, 'Erro de conexão', true);
+        } finally {
+            btnUploadQr.disabled = false;
+            btnUploadQr.textContent = 'Salvar QR Code';
         }
     }
 
@@ -93,7 +150,6 @@ document.addEventListener('DOMContentLoaded', () => {
             usersTbody.innerHTML = '<tr><td colspan="4" style="text-align:center">Nenhum usuário cadastrado.</td></tr>';
             return;
         }
-
         users.forEach(user => {
             const tr = document.createElement('tr');
             tr.innerHTML = `
@@ -128,7 +184,6 @@ document.addEventListener('DOMContentLoaded', () => {
             historyTbody.innerHTML = '<tr><td colspan="5" style="text-align:center">Nenhuma transação registrada.</td></tr>';
             return;
         }
-
         transactions.forEach(t => {
             const tr = document.createElement('tr');
             const date = new Date(t.timestamp).toLocaleString('pt-BR');
@@ -136,7 +191,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const typeStr = isRecharge ? 'Recarga' : 'Consumo';
             const color = isRecharge ? 'var(--success)' : '#fff';
             const sign = isRecharge ? '+' : '-';
-
             tr.innerHTML = `
                 <td>${date}</td>
                 <td>${t.name}</td>
@@ -160,7 +214,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.deleteUser = async function (id) {
         if (!confirm('Deseja realmente excluir este usuário?')) return;
-
         try {
             const res = await fetch(`${API_URL}/users/${id}`, { method: 'DELETE' });
             if (res.ok) {
@@ -176,30 +229,23 @@ document.addEventListener('DOMContentLoaded', () => {
     async function handleAddStock() {
         const grams = parseFloat(addGramsInput.value);
         const cost = parseFloat(addCostInput.value);
-
         if (isNaN(grams) || grams <= 0) {
             showMessage(stockMsg, 'Insira a quantidade em gramas.', true);
             return;
         }
-
         btnAddStock.disabled = true;
         btnAddStock.textContent = 'Adicionando...';
-
         try {
             const res = await fetch(`${API_URL}/system/stock`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ added_grams: grams, added_cost: isNaN(cost) ? 0 : cost })
             });
-
-            const data = await res.json();
             if (res.ok) {
                 showMessage(stockMsg, 'Estoque adicionado com sucesso!');
                 addGramsInput.value = '';
                 addCostInput.value = '';
                 loadSystemState();
-            } else {
-                showMessage(stockMsg, data.error || 'Erro ao adicionar', true);
             }
         } catch (error) {
             showMessage(stockMsg, 'Erro de conexão', true);
@@ -209,65 +255,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    async function handleUploadQr() {
-        const file = qrFileInput.files[0];
-        if (!file) {
-            showMessage(qrMsg, 'Selecione uma imagem primeiro.', true);
-            return;
-        }
-
-        const formData = new FormData();
-        formData.append('qr_image', file);
-
-        btnUploadQr.disabled = true;
-        btnUploadQr.textContent = 'Enviando...';
-
-        try {
-            const res = await fetch(`${API_URL}/system/qr`, {
-                method: 'POST',
-                body: formData
-            });
-
-            const data = await res.json();
-            if (res.ok) {
-                showMessage(qrMsg, 'QR Code salvo!');
-                qrFileInput.value = '';
-                loadSystemState();
-            } else {
-                showMessage(qrMsg, data.error || 'Erro no upload', true);
-            }
-        } catch (error) {
-            showMessage(qrMsg, 'Erro de conexão', true);
-        } finally {
-            btnUploadQr.disabled = false;
-            btnUploadQr.textContent = 'Salvar QR Code';
-        }
-    }
-
     async function handleSaveUser() {
         const id = editUserId.value;
         const name = newUserName.value.trim();
         const matricula = newUserMatricula.value.trim();
         const balance = parseFloat(newUserBalance.value) || 0;
-
         if (!name || !matricula) {
             showMessage(userMsg, 'Preencha nome e matrícula.', true);
             return;
         }
-
         btnSaveUser.disabled = true;
-
         const url = id ? `${API_URL}/users/${id}` : `${API_URL}/users`;
         const method = id ? 'PUT' : 'POST';
-
         try {
             const res = await fetch(url, {
                 method,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, matricula, balance })
             });
-
-            const data = await res.json();
             if (res.ok) {
                 showMessage(userMsg, id ? 'Usuário atualizado!' : 'Usuário cadastrado!');
                 setTimeout(() => {
@@ -275,6 +280,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     loadUsers();
                 }, 1000);
             } else {
+                const data = await res.json();
                 showMessage(userMsg, data.error || 'Erro ao salvar', true);
             }
         } catch (error) {
