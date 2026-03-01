@@ -137,6 +137,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        if (matricula === '0000') {
+            console.log('Admin login detected, redirecting...');
+            window.location.href = '/admin.html';
+            return;
+        }
+
         btnLogin.textContent = 'Carregando...';
         btnLogin.disabled = true;
 
@@ -144,10 +150,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch(`${API_URL}/users/${matricula}`);
             if (res.ok) {
                 const user = await res.json();
-                if (user.matricula === '0000') {
-                    window.location.href = '/admin.html';
-                    return;
-                }
                 currentUser = user;
                 showDashboard();
             } else {

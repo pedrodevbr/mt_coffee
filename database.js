@@ -60,6 +60,13 @@ function initSchema() {
                 db.run(`INSERT INTO settings (key, value) VALUES ('dose_grams', '10')`);
             }
         });
+
+        // Ensure admin user exists
+        db.get(`SELECT * FROM users WHERE matricula = '0000'`, (err, row) => {
+            if (!row) {
+                db.run(`INSERT INTO users (name, matricula, balance) VALUES ('Admin', '0000', 0)`);
+            }
+        });
     });
 }
 
