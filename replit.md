@@ -6,7 +6,7 @@ A coffee consumption tracking system for a shared office/lab setting.
 
 - **Runtime**: Node.js 20
 - **Framework**: Express.js 5
-- **Database**: SQLite (via sqlite3)
+- **Database**: PostgreSQL (Replit built-in, accessed via `DATABASE_URL`)
 - **Frontend**: Static HTML/CSS/JS served from the `public/` directory
 - **Single server**: Backend API and frontend served together on the same Express app
 
@@ -14,7 +14,7 @@ A coffee consumption tracking system for a shared office/lab setting.
 
 ```
 server.js        - Express server (API routes + static file serving)
-database.js      - SQLite connection and schema initialization
+database.js      - PostgreSQL connection pool and schema initialization
 public/
   index.html     - Main user-facing page
   admin.html     - Admin panel
@@ -27,7 +27,7 @@ public/
 
 - **Port**: 5000 (default, configurable via PORT env var)
 - **Start**: `node server.js`
-- **Database file**: `mt_coffee.sqlite` (created automatically)
+- **Database**: PostgreSQL via DATABASE_URL env var (persistent across deployments)
 
 ## Features
 
@@ -36,10 +36,18 @@ public/
 - Coffee consumption tracking (deduct from user balance and stock)
 - Balance recharge for users
 - QR code upload for payment
-- Admin panel for system management
+- PIX key management for admin
+- Admin panel for system management (matricula "0000")
+
+## Key Details
+
+- Admin access: Enter matricula "0000" on the main page to be redirected to `/admin.html`
+- Admin user is auto-created in the database on startup
+- All monetary values are in BRL (R$)
+- Dose size default: 10g, price calculated dynamically from stock cost
 
 ## Deployment
 
 - Target: autoscale
 - Run command: `node server.js`
-- Note: Uses SQLite, so persistent storage requires a VM deployment or external DB for production
+- Database: Replit PostgreSQL (persists across deployments)

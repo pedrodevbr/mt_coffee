@@ -3,18 +3,16 @@ const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const db = require('./database');
+const { pool, initSchema } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Set up file storage for QR Code uploads
-const dataDir = process.env.RENDER_DATA_DIR || path.join(__dirname, 'public');
+const dataDir = path.join(__dirname, 'public');
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         const uploadDir = path.join(dataDir, 'assets');
@@ -29,39 +27,37 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage: storage });
 
-// --- SETTINGS AND SYSTEM STATE ROUTES ---
-app.get('/api/system', (req, res) => {
-    db.get('SELECT * FROM system_state ORDER BY id DESC LIMIT 1', (err, state) => {
-        if (err) return res.status(500).json({ error: err.message });
+app.get('/api/system', async (req, res) => {
+    try {
+        const stateResult = await pool.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');
+        const settingResult = await pool.query("SELECT value FROM settings WHERE key = $1", ['dose_grams']);
 
-        db.get('SELECT value FROM settings WHERE key = ?', ['dose_grams'], (err, setting) => {
-            if (err) return res.status(500).json({ error: err.message });
+        const doseGrams = settingResult.rows.length ? parseFloat(settingResult.rows[0].value) : 10;
+        const state = stateResult.rows.length ? stateResult.rows[0] : { coffee_stock_grams: 0, stock_total_cost: 0, qr_code_url: '', pix_key: '' };
 
-            const doseGrams = setting ? parseFloat(setting.value) : 10;
-            const stateObj = state || { coffee_stock_grams: 0, stock_total_cost: 0, qr_code_url: '', pix_key: '' };
+        let currentPricePerDose = 0;
+        if (state.coffee_stock_grams > 0) {
+            const costPerGram = state.stock_total_cost / state.coffee_stock_grams;
+            currentPricePerDose = costPerGram * doseGrams;
+        }
 
-            // Calculate dynamic price
-            let currentPricePerDose = 0;
-            if (stateObj.coffee_stock_grams > 0) {
-                const costPerGram = stateObj.stock_total_cost / stateObj.coffee_stock_grams;
-                currentPricePerDose = costPerGram * doseGrams;
-            }
-
-            res.json({
-                ...stateObj,
-                dose_grams: doseGrams,
-                current_price_per_dose: currentPricePerDose
-            });
+        res.json({
+            ...state,
+            dose_grams: doseGrams,
+            current_price_per_dose: currentPricePerDose
         });
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.post('/api/system/stock', (req, res) => {
-    const { added_grams, added_cost } = req.body;
-    if (!added_grams || added_grams <= 0) return res.status(400).json({ error: "Invalid grams" });
+app.post('/api/system/stock', async (req, res) => {
+    try {
+        const { added_grams, added_cost } = req.body;
+        if (!added_grams || added_grams <= 0) return res.status(400).json({ error: "Invalid grams" });
 
-    db.get('SELECT * FROM system_state ORDER BY id DESC LIMIT 1', (err, state) => {
-        if (err) return res.status(500).json({ error: err.message });
+        const stateResult = await pool.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');
+        const state = stateResult.rows[0];
 
         const currentGrams = state ? state.coffee_stock_grams : 0;
         const currentCost = state ? state.stock_total_cost : 0;
@@ -69,177 +65,212 @@ app.post('/api/system/stock', (req, res) => {
         const newGrams = currentGrams + parseFloat(added_grams);
         const newCost = currentCost + parseFloat(added_cost || 0);
 
-        db.run('UPDATE system_state SET coffee_stock_grams = ?, stock_total_cost = ?', [newGrams, newCost], function (err) {
-            if (err) return res.status(500).json({ error: err.message });
-            res.json({ success: true, message: "Stock updated successfully", newStock: newGrams });
-        });
-    });
-});
-
-app.post('/api/system/qr', upload.single('qr_image'), (req, res) => {
-    if (!req.file) {
-        return res.status(400).json({ error: 'No file uploaded' });
+        await pool.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [newGrams, newCost]);
+        res.json({ success: true, message: "Stock updated successfully", newStock: newGrams });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
-    const qrUrl = '/assets/' + req.file.filename;
-    db.run('UPDATE system_state SET qr_code_url = ?', [qrUrl], function (err) {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ success: true, url: qrUrl });
-    });
 });
 
-app.post('/api/system/pix', (req, res) => {
-    const { pix_key } = req.body;
-    db.run('UPDATE system_state SET pix_key = ?', [pix_key || ''], function (err) {
-        if (err) return res.status(500).json({ error: err.message });
+app.post('/api/system/qr', upload.single('qr_image'), async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+        const qrUrl = '/assets/' + req.file.filename;
+        await pool.query('UPDATE system_state SET qr_code_url = $1', [qrUrl]);
+        res.json({ success: true, url: qrUrl });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/system/pix', async (req, res) => {
+    try {
+        const { pix_key } = req.body;
+        await pool.query('UPDATE system_state SET pix_key = $1', [pix_key || '']);
         res.json({ success: true, message: 'Chave PIX atualizada' });
-    });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.use('/assets', express.static(path.join(dataDir, 'assets')));
 
-// --- USERS ROUTES ---
-app.get('/api/users', (req, res) => {
-    db.all('SELECT * FROM users ORDER BY name', (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
-});
-
-app.get('/api/users/:matricula', (req, res) => {
-    db.get('SELECT * FROM users WHERE matricula = ?', [req.params.matricula], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!row) return res.status(404).json({ error: 'User not found' });
-        res.json(row);
-    });
-});
-
-app.post('/api/users', (req, res) => {
-    const { name, matricula, balance } = req.body;
-    if (matricula === '0000') {
-        db.get('SELECT * FROM users WHERE matricula = ?', ['0000'], (err, row) => {
-            if (row) {
-                return res.status(400).json({ error: 'Matrícula reservada para administração.' });
-            } else {
-                db.run('INSERT INTO users (name, matricula, balance) VALUES (?, ?, ?)',
-                    [name, matricula, balance || 0], function (err) {
-                        if (err) return res.status(400).json({ error: err.message });
-                        return res.status(201).json({ id: this.lastID, name, matricula, balance: balance || 0 });
-                    });
-            }
-        });
-        return;
+app.get('/api/users', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM users ORDER BY name');
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
-
-    db.run('INSERT INTO users (name, matricula, balance) VALUES (?, ?, ?)',
-        [name, matricula, balance || 0], function (err) {
-            if (err) return res.status(400).json({ error: err.message });
-            res.status(201).json({ id: this.lastID, name, matricula, balance: balance || 0 });
-        });
 });
 
-app.put('/api/users/:id', (req, res) => {
-    const { name, matricula, balance } = req.body;
-    db.run('UPDATE users SET name = ?, matricula = ?, balance = ? WHERE id = ?',
-        [name, matricula, balance, req.params.id], function (err) {
-            if (err) return res.status(400).json({ error: err.message });
-            res.json({ success: true });
-        });
+app.get('/api/users/:matricula', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM users WHERE matricula = $1', [req.params.matricula]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.delete('/api/users/:id', (req, res) => {
-    db.run('DELETE FROM users WHERE id = ?', [req.params.id], function (err) {
-        if (err) return res.status(500).json({ error: err.message });
+app.post('/api/users', async (req, res) => {
+    try {
+        const { name, matricula, balance } = req.body;
+
+        if (matricula === '0000') {
+            const existing = await pool.query('SELECT * FROM users WHERE matricula = $1', ['0000']);
+            if (existing.rows.length > 0) {
+                return res.status(400).json({ error: 'Matrícula reservada para administração.' });
+            }
+        }
+
+        const result = await pool.query(
+            'INSERT INTO users (name, matricula, balance) VALUES ($1, $2, $3) RETURNING *',
+            [name, matricula, balance || 0]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+});
+
+app.put('/api/users/:id', async (req, res) => {
+    try {
+        const { name, matricula, balance } = req.body;
+        await pool.query(
+            'UPDATE users SET name = $1, matricula = $2, balance = $3 WHERE id = $4',
+            [name, matricula, balance, req.params.id]
+        );
         res.json({ success: true });
-    });
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
 });
 
-// --- TRANSACTIONS ROUTES ---
-app.get('/api/transactions', (req, res) => {
-    db.all(`
-        SELECT t.*, u.name, u.matricula 
-        FROM transactions t 
-        JOIN users u ON t.user_id = u.id 
-        ORDER BY t.timestamp DESC
-        LIMIT 100
-    `, (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
+app.delete('/api/users/:id', async (req, res) => {
+    try {
+        await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.get('/api/transactions/:matricula', (req, res) => {
-    db.all(`
-        SELECT t.* 
-        FROM transactions t 
-        JOIN users u ON t.user_id = u.id 
-        WHERE u.matricula = ?
-        ORDER BY t.timestamp DESC
-        LIMIT 20
-    `, [req.params.matricula], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
-    });
+app.get('/api/transactions', async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT t.*, u.name, u.matricula 
+            FROM transactions t 
+            JOIN users u ON t.user_id = u.id 
+            ORDER BY t.timestamp DESC
+            LIMIT 100
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
-app.post('/api/consume', (req, res) => {
-    const { matricula } = req.body;
-    db.get('SELECT * FROM users WHERE matricula = ?', [matricula], (err, user) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!user) return res.status(404).json({ error: 'User not found' });
+app.get('/api/transactions/:matricula', async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT t.* 
+            FROM transactions t 
+            JOIN users u ON t.user_id = u.id 
+            WHERE u.matricula = $1
+            ORDER BY t.timestamp DESC
+            LIMIT 20
+        `, [req.params.matricula]);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
 
-        db.get('SELECT * FROM system_state ORDER BY id DESC LIMIT 1', (err, state) => {
-            if (err) return res.status(500).json({ error: err.message });
+app.post('/api/consume', async (req, res) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const { matricula } = req.body;
 
-            db.get('SELECT value FROM settings WHERE key = ?', ['dose_grams'], (err, setting) => {
-                if (err) return res.status(500).json({ error: err.message });
+        const userResult = await client.query('SELECT * FROM users WHERE matricula = $1', [matricula]);
+        if (userResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'User not found' });
+        }
+        const user = userResult.rows[0];
 
-                const doseGrams = setting ? parseFloat(setting.value) : 10;
+        const stateResult = await client.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');
+        const state = stateResult.rows[0];
 
-                if (!state || state.coffee_stock_grams < doseGrams) {
-                    return res.status(400).json({ error: 'Not enough coffee stock!' });
-                }
+        const settingResult = await client.query("SELECT value FROM settings WHERE key = $1", ['dose_grams']);
+        const doseGrams = settingResult.rows.length ? parseFloat(settingResult.rows[0].value) : 10;
 
-                const costPerGram = state.stock_total_cost / state.coffee_stock_grams;
-                const pricePerDose = costPerGram * doseGrams;
+        if (!state || state.coffee_stock_grams < doseGrams) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'Not enough coffee stock!' });
+        }
 
-                db.run('UPDATE users SET balance = balance - ? WHERE id = ?', [pricePerDose, user.id], (err) => {
-                    if (err) return res.status(500).json({ error: err.message });
-                    db.run('INSERT INTO transactions (user_id, amount, type) VALUES (?, ?, ?)', [user.id, -pricePerDose, 'consumption']);
-                    const newStock = state.coffee_stock_grams - doseGrams;
-                    const newCost = state.stock_total_cost - pricePerDose;
-                    db.run('UPDATE system_state SET coffee_stock_grams = ?, stock_total_cost = ?', [newStock, newCost], (err) => {
-                        if (err) return res.status(500).json({ error: err.message });
-                        res.json({
-                            success: true,
-                            message: 'Coffee consumed!',
-                            new_balance: user.balance - pricePerDose,
-                            cost: pricePerDose
-                        });
-                    });
-                });
-            });
+        const costPerGram = state.stock_total_cost / state.coffee_stock_grams;
+        const pricePerDose = costPerGram * doseGrams;
+
+        await client.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [pricePerDose, user.id]);
+        await client.query('INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, $3)', [user.id, -pricePerDose, 'consumption']);
+
+        const newStock = state.coffee_stock_grams - doseGrams;
+        const newCost = state.stock_total_cost - pricePerDose;
+        await client.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [newStock, newCost]);
+
+        await client.query('COMMIT');
+
+        res.json({
+            success: true,
+            message: 'Coffee consumed!',
+            new_balance: user.balance - pricePerDose,
+            cost: pricePerDose
         });
-    });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
 });
 
-app.post('/api/recharge', (req, res) => {
-    const { matricula, amount } = req.body;
-    if (!amount || amount <= 0) return res.status(400).json({ error: 'Invalid amount' });
+app.post('/api/recharge', async (req, res) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const { matricula, amount } = req.body;
+        if (!amount || amount <= 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'Invalid amount' });
+        }
 
-    db.get('SELECT * FROM users WHERE matricula = ?', [matricula], (err, user) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!user) return res.status(404).json({ error: 'User not found' });
+        const userResult = await client.query('SELECT * FROM users WHERE matricula = $1', [matricula]);
+        if (userResult.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'User not found' });
+        }
+        const user = userResult.rows[0];
 
-        db.run('UPDATE users SET balance = balance + ? WHERE id = ?', [amount, user.id], (err) => {
-            if (err) return res.status(500).json({ error: err.message });
-            db.run('INSERT INTO transactions (user_id, amount, type) VALUES (?, ?, ?)', [user.id, amount, 'recharge']);
-            res.json({
-                success: true,
-                message: 'Balance recharged!',
-                new_balance: user.balance + amount
-            });
+        await client.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [amount, user.id]);
+        await client.query('INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, $3)', [user.id, amount, 'recharge']);
+
+        await client.query('COMMIT');
+
+        res.json({
+            success: true,
+            message: 'Balance recharged!',
+            new_balance: user.balance + amount
         });
-    });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
 });
 
 app.use((req, res) => {
@@ -250,6 +281,11 @@ app.use((req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+initSchema().then(() => {
+    app.listen(PORT, () => {
+        console.log(`Server running on http://localhost:${PORT}`);
+    });
+}).catch(err => {
+    console.error('Failed to initialize database:', err);
+    process.exit(1);
 });
