@@ -2,30 +2,16 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 const { pool, initSchema } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-const dataDir = path.join(__dirname, 'public');
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        const uploadDir = path.join(dataDir, 'assets');
-        if (!fs.existsSync(uploadDir)) {
-            fs.mkdirSync(uploadDir, { recursive: true });
-        }
-        cb(null, uploadDir);
-    },
-    filename: (req, file, cb) => {
-        cb(null, 'qr_code' + path.extname(file.originalname));
-    }
-});
-const upload = multer({ storage: storage });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
 app.get('/api/system', async (req, res) => {
     try {
@@ -75,9 +61,11 @@ app.post('/api/system/stock', async (req, res) => {
 app.post('/api/system/qr', upload.single('qr_image'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-        const qrUrl = '/assets/' + req.file.filename;
-        await pool.query('UPDATE system_state SET qr_code_url = $1', [qrUrl]);
-        res.json({ success: true, url: qrUrl });
+        const mimeType = req.file.mimetype;
+        const base64 = req.file.buffer.toString('base64');
+        const dataUrl = `data:${mimeType};base64,${base64}`;
+        await pool.query('UPDATE system_state SET qr_code_url = $1', [dataUrl]);
+        res.json({ success: true, url: dataUrl });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -93,7 +81,6 @@ app.post('/api/system/pix', async (req, res) => {
     }
 });
 
-app.use('/assets', express.static(path.join(dataDir, 'assets')));
 
 app.get('/api/users', async (req, res) => {
     try {
