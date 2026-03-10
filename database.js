@@ -54,6 +54,11 @@ async function initSchema() {
             await client.query("INSERT INTO settings (key, value) VALUES ('dose_grams', '10')");
         }
 
+        const pinCount = await client.query("SELECT COUNT(*) as count FROM settings WHERE key = 'admin_pin'");
+        if (parseInt(pinCount.rows[0].count) === 0) {
+            await client.query("INSERT INTO settings (key, value) VALUES ('admin_pin', '1234')");
+        }
+
         const adminCheck = await client.query("SELECT * FROM users WHERE matricula = '0000'");
         if (adminCheck.rows.length === 0) {
             await client.query("INSERT INTO users (name, matricula, balance) VALUES ('Admin', '0000', 0)");

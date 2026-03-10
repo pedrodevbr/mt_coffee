@@ -37,3 +37,8 @@ externalPort = 80
 deploymentTarget = "cloudrun"
 run = ["sh", "-c", "node server.js"]
 publicDir = "public"
+
+[userenv]
+
+[userenv.shared]
+JWT_SECRET = "d335aa0c8fb5071f443ad75b7fe7b450522eaba0d18cf7cd1fcc0adbc02c52bf"

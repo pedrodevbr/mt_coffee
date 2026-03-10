@@ -1,7 +1,165 @@
 document.addEventListener('DOMContentLoaded', () => {
     const API_URL = '/api';
+    const TOKEN_KEY = 'mt_admin_token';
 
-    // Elements – Stock
+    // =====================
+    //  AUTH HELPERS
+    // =====================
+    function getToken() {
+        return sessionStorage.getItem(TOKEN_KEY);
+    }
+
+    function saveToken(token) {
+        sessionStorage.setItem(TOKEN_KEY, token);
+    }
+
+    function clearToken() {
+        sessionStorage.removeItem(TOKEN_KEY);
+    }
+
+    function authHeaders() {
+        return {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${getToken()}`
+        };
+    }
+
+    async function authFetch(url, options = {}) {
+        const token = getToken();
+        const headers = { ...(options.headers || {}), 'Authorization': `Bearer ${token}` };
+        const res = await fetch(url, { ...options, headers });
+        if (res.status === 401 || res.status === 403) {
+            clearToken();
+            showLoginOverlay();
+        }
+        return res;
+    }
+
+    // =====================
+    //  LOGIN OVERLAY
+    // =====================
+    const overlay = document.getElementById('admin-login-overlay');
+    const pinInput = document.getElementById('pin-input');
+    const btnPinLogin = document.getElementById('btn-pin-login');
+    const pinError = document.getElementById('pin-error');
+
+    function showLoginOverlay() {
+        overlay.style.display = 'flex';
+        pinInput.value = '';
+        pinError.textContent = '';
+        setTimeout(() => pinInput.focus(), 100);
+    }
+
+    function hideLoginOverlay() {
+        overlay.style.display = 'none';
+    }
+
+    async function handlePinLogin(e) {
+        if (e) e.preventDefault();
+        const pin = pinInput.value.trim();
+        if (!pin) { pinError.textContent = 'Informe o PIN.'; return; }
+
+        btnPinLogin.disabled = true;
+        btnPinLogin.textContent = 'Verificando...';
+        pinError.textContent = '';
+
+        try {
+            const res = await fetch(`${API_URL}/admin/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin })
+            });
+            const data = await res.json();
+            if (res.ok && data.token) {
+                saveToken(data.token);
+                hideLoginOverlay();
+                initAdminPanel();
+            } else {
+                pinError.textContent = data.error || 'PIN incorreto.';
+                pinInput.value = '';
+                pinInput.focus();
+            }
+        } catch {
+            pinError.textContent = 'Erro de conexão. Tente novamente.';
+        } finally {
+            btnPinLogin.disabled = false;
+            btnPinLogin.textContent = 'Entrar';
+        }
+    }
+
+    document.getElementById('pin-form').addEventListener('submit', handlePinLogin);
+
+    // Logout
+    document.getElementById('btn-logout').addEventListener('click', () => {
+        clearToken();
+        showLoginOverlay();
+    });
+
+    // =====================
+    //  CHANGE PIN MODAL
+    // =====================
+    const pinModal = document.getElementById('pin-modal');
+    const closePinModal = document.getElementById('close-pin-modal');
+    const currentPinInput = document.getElementById('current-pin');
+    const newPinInput = document.getElementById('new-pin');
+    const confirmPinInput = document.getElementById('confirm-pin');
+    const btnChangePin = document.getElementById('btn-change-pin');
+    const pinChangeMsg = document.getElementById('pin-change-msg');
+
+    document.getElementById('btn-open-pin-modal').addEventListener('click', () => {
+        currentPinInput.value = '';
+        newPinInput.value = '';
+        confirmPinInput.value = '';
+        pinChangeMsg.textContent = '';
+        pinModal.classList.remove('hidden');
+    });
+
+    closePinModal.addEventListener('click', () => pinModal.classList.add('hidden'));
+
+    btnChangePin.addEventListener('click', async () => {
+        const current_pin = currentPinInput.value.trim();
+        const new_pin = newPinInput.value.trim();
+        const confirm = confirmPinInput.value.trim();
+
+        if (!current_pin || !new_pin || !confirm) {
+            showMessage(pinChangeMsg, 'Preencha todos os campos.', true);
+            return;
+        }
+        if (new_pin !== confirm) {
+            showMessage(pinChangeMsg, 'Os PINs não coincidem.', true);
+            return;
+        }
+        if (new_pin.length < 4) {
+            showMessage(pinChangeMsg, 'O PIN deve ter ao menos 4 caracteres.', true);
+            return;
+        }
+
+        btnChangePin.disabled = true;
+        btnChangePin.textContent = 'Salvando...';
+        try {
+            const res = await authFetch(`${API_URL}/admin/pin`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ current_pin, new_pin })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showMessage(pinChangeMsg, 'PIN alterado com sucesso!');
+                setTimeout(() => pinModal.classList.add('hidden'), 1500);
+            } else {
+                showMessage(pinChangeMsg, data.error || 'Erro ao alterar PIN.', true);
+            }
+        } catch {
+            showMessage(pinChangeMsg, 'Erro de conexão.', true);
+        } finally {
+            btnChangePin.disabled = false;
+            btnChangePin.textContent = 'Salvar novo PIN';
+        }
+    });
+
+    // =====================
+    //  ELEMENTS
+    // =====================
     const adminCurrentStock = document.getElementById('admin-current-stock');
     const adminDosePrice = document.getElementById('admin-dose-price');
     const addGramsInput = document.getElementById('add-grams');
@@ -9,7 +167,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnAddStock = document.getElementById('btn-add-stock');
     const stockMsg = document.getElementById('stock-msg');
 
-    // Elements – PIX/QR
     const qrPreview = document.getElementById('admin-qr-preview');
     const qrFileInput = document.getElementById('qr-file');
     const btnUploadQr = document.getElementById('btn-upload-qr');
@@ -17,12 +174,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const pixKeyInput = document.getElementById('pix-key-input');
     const btnSavePix = document.getElementById('btn-save-pix');
 
-    // Elements – Users
     const usersTbody = document.getElementById('users-tbody');
     const btnNewUser = document.getElementById('btn-new-user');
     const historyTbody = document.getElementById('history-tbody');
 
-    // Modal
     const userModal = document.getElementById('user-modal');
     const closeUserModal = document.getElementById('close-user-modal');
     const newUserName = document.getElementById('new-user-name');
@@ -33,15 +188,26 @@ document.addEventListener('DOMContentLoaded', () => {
     const editUserId = document.getElementById('edit-user-id');
     const newUserBalance = document.getElementById('new-user-balance');
 
-    // Charts
     let chartCount = null;
     let chartValue = null;
 
-    // Init
-    loadSystemState();
-    loadUsers();
-    loadHistory();
-    loadStats();
+    // =====================
+    //  INIT
+    // =====================
+    function initAdminPanel() {
+        loadSystemState();
+        loadUsers();
+        loadHistory();
+        loadStats();
+    }
+
+    // Check token on load
+    if (getToken()) {
+        hideLoginOverlay();
+        initAdminPanel();
+    } else {
+        showLoginOverlay();
+    }
 
     // Events
     btnAddStock.addEventListener('click', handleAddStock);
@@ -67,12 +233,12 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadStats() {
         try {
             const [monthlyRes, avgRes] = await Promise.all([
-                fetch(`${API_URL}/stats/monthly`),
-                fetch(`${API_URL}/stats/daily-average`)
+                authFetch(`${API_URL}/stats/monthly`),
+                authFetch(`${API_URL}/stats/daily-average`)
             ]);
+            if (!monthlyRes.ok || !avgRes.ok) return;
             const monthly = await monthlyRes.json();
             const avg = await avgRes.json();
-
             renderKPIs(avg);
             renderMonthlyCharts(monthly);
             renderTopUsers(avg.top_users_last_30_days);
@@ -102,19 +268,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const baseOptions = {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
+            plugins: { legend: { display: false } },
             scales: {
-                x: {
-                    ticks: { color: tickColor, font: { size: 10 } },
-                    grid: { color: gridColor }
-                },
-                y: {
-                    ticks: { color: tickColor, font: { size: 10 } },
-                    grid: { color: gridColor },
-                    beginAtZero: true
-                }
+                x: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: gridColor } },
+                y: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: gridColor }, beginAtZero: true }
             }
         };
 
@@ -123,24 +280,11 @@ document.addEventListener('DOMContentLoaded', () => {
             type: 'bar',
             data: {
                 labels,
-                datasets: [{
-                    data: counts,
-                    backgroundColor: `${amber}99`,
-                    borderColor: amber,
-                    borderWidth: 2,
-                    borderRadius: 6
-                }]
+                datasets: [{ data: counts, backgroundColor: `${amber}99`, borderColor: amber, borderWidth: 2, borderRadius: 6 }]
             },
             options: {
                 ...baseOptions,
-                plugins: {
-                    ...baseOptions.plugins,
-                    tooltip: {
-                        callbacks: {
-                            label: ctx => `${ctx.parsed.y} doses`
-                        }
-                    }
-                }
+                plugins: { ...baseOptions.plugins, tooltip: { callbacks: { label: ctx => `${ctx.parsed.y} doses` } } }
             }
         });
 
@@ -149,35 +293,12 @@ document.addEventListener('DOMContentLoaded', () => {
             type: 'bar',
             data: {
                 labels,
-                datasets: [{
-                    data: values,
-                    backgroundColor: `${blue}99`,
-                    borderColor: blue,
-                    borderWidth: 2,
-                    borderRadius: 6
-                }]
+                datasets: [{ data: values, backgroundColor: `${blue}99`, borderColor: blue, borderWidth: 2, borderRadius: 6 }]
             },
             options: {
                 ...baseOptions,
-                plugins: {
-                    ...baseOptions.plugins,
-                    tooltip: {
-                        callbacks: {
-                            label: ctx => `R$ ${ctx.parsed.y.toFixed(2).replace('.', ',')}`
-                        }
-                    }
-                },
-                scales: {
-                    ...baseOptions.scales,
-                    y: {
-                        ...baseOptions.scales.y,
-                        ticks: {
-                            color: tickColor,
-                            font: { size: 10 },
-                            callback: v => `R$${v.toFixed(0)}`
-                        }
-                    }
-                }
+                plugins: { ...baseOptions.plugins, tooltip: { callbacks: { label: ctx => `R$ ${ctx.parsed.y.toFixed(2).replace('.', ',')}` } } },
+                scales: { ...baseOptions.scales, y: { ...baseOptions.scales.y, ticks: { color: tickColor, font: { size: 10 }, callback: v => `R$${v.toFixed(0)}` } } }
             }
         });
     }
@@ -199,8 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         <div class="top-user-bar" style="width: ${pct}%"></div>
                     </div>
                     <span class="top-user-count">${count}</span>
-                </div>
-            `;
+                </div>`;
         }).join('');
     }
 
@@ -212,8 +332,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetch(`${API_URL}/system`);
             if (res.ok) {
                 const state = await res.json();
-                adminCurrentStock.textContent = `${state.coffee_stock_grams.toFixed(0)} g`;
-                adminDosePrice.textContent = `R$ ${state.current_price_per_dose.toFixed(2).replace('.', ',')}`;
+                adminCurrentStock.textContent = `${parseFloat(state.coffee_stock_grams).toFixed(0)} g`;
+                adminDosePrice.textContent = `R$ ${parseFloat(state.current_price_per_dose).toFixed(2).replace('.', ',')}`;
                 if (state.qr_code_url) qrPreview.src = state.qr_code_url;
                 if (state.pix_key) pixKeyInput.value = state.pix_key;
             }
@@ -227,9 +347,9 @@ document.addEventListener('DOMContentLoaded', () => {
         btnSavePix.disabled = true;
         btnSavePix.textContent = 'Salvando...';
         try {
-            const res = await fetch(`${API_URL}/system/pix`, {
+            const res = await authFetch(`${API_URL}/system/pix`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders(),
                 body: JSON.stringify({ pix_key })
             });
             showMessage(qrMsg, res.ok ? 'Chave PIX atualizada!' : 'Erro ao salvar chave', !res.ok);
@@ -244,12 +364,17 @@ document.addEventListener('DOMContentLoaded', () => {
     async function handleUploadQr() {
         const file = qrFileInput.files[0];
         if (!file) { showMessage(qrMsg, 'Selecione uma imagem primeiro.', true); return; }
+
         const formData = new FormData();
         formData.append('qr_image', file);
         btnUploadQr.disabled = true;
         btnUploadQr.textContent = 'Enviando...';
         try {
-            const res = await fetch(`${API_URL}/system/qr`, { method: 'POST', body: formData });
+            const res = await authFetch(`${API_URL}/system/qr`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${getToken()}` },
+                body: formData
+            });
             if (res.ok) {
                 showMessage(qrMsg, 'QR Code salvo!');
                 qrFileInput.value = '';
@@ -271,7 +396,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // =====================
     async function loadUsers() {
         try {
-            const res = await fetch(`${API_URL}/users`);
+            const res = await authFetch(`${API_URL}/users`);
             if (res.ok) renderUsers(await res.json());
         } catch {
             usersTbody.innerHTML = '<tr><td colspan="4">Erro ao carregar usuários.</td></tr>';
@@ -291,10 +416,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${user.matricula}</td>
                 <td>R$ ${parseFloat(user.balance).toFixed(2).replace('.', ',')}</td>
                 <td>
-                    <button class="btn-outline" onclick="editUser(${user.id}, '${user.name.replace(/'/g, "\\'")}', '${user.matricula}', ${user.balance})" style="padding: 4px 10px; font-size: 0.8rem; border-color: var(--secondary-color); color: var(--secondary-color); margin-right: 5px; cursor: pointer; background: transparent; border-radius: 6px; border: 1px solid;">Editar</button>
-                    <button class="btn-outline" onclick="deleteUser(${user.id})" style="padding: 4px 10px; font-size: 0.8rem; border-color: var(--danger); color: var(--danger); cursor: pointer; background: transparent; border-radius: 6px; border: 1px solid;">Excluir</button>
-                </td>
-            `;
+                    <button onclick="editUser(${user.id}, '${user.name.replace(/'/g, "\\'")}', '${user.matricula}', ${user.balance})" style="padding: 4px 10px; font-size: 0.8rem; color: var(--secondary-color); cursor: pointer; background: transparent; border-radius: 6px; border: 1px solid var(--secondary-color); margin-right: 5px;">Editar</button>
+                    <button onclick="deleteUser(${user.id})" style="padding: 4px 10px; font-size: 0.8rem; color: var(--danger); cursor: pointer; background: transparent; border-radius: 6px; border: 1px solid var(--danger);">Excluir</button>
+                </td>`;
             usersTbody.appendChild(tr);
         });
     }
@@ -304,7 +428,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // =====================
     async function loadHistory() {
         try {
-            const res = await fetch(`${API_URL}/transactions`);
+            const res = await authFetch(`${API_URL}/transactions`);
             if (res.ok) renderHistory(await res.json());
         } catch {
             historyTbody.innerHTML = '<tr><td colspan="5">Erro ao carregar histórico.</td></tr>';
@@ -321,15 +445,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const tr = document.createElement('tr');
             const date = new Date(t.timestamp).toLocaleString('pt-BR');
             const isRecharge = t.type === 'recharge';
-            const color = isRecharge ? 'var(--success)' : '#fff';
-            const sign = isRecharge ? '+' : '-';
             tr.innerHTML = `
                 <td>${date}</td>
                 <td>${t.name}</td>
                 <td>${t.matricula}</td>
                 <td>${isRecharge ? 'Recarga' : 'Consumo'}</td>
-                <td style="color: ${color}">${sign} R$ ${Math.abs(t.amount).toFixed(2).replace('.', ',')}</td>
-            `;
+                <td style="color: ${isRecharge ? 'var(--success)' : '#fff'}">${isRecharge ? '+' : '-'} R$ ${Math.abs(t.amount).toFixed(2).replace('.', ',')}</td>`;
             historyTbody.appendChild(tr);
         });
     }
@@ -347,9 +468,9 @@ document.addEventListener('DOMContentLoaded', () => {
         btnAddStock.disabled = true;
         btnAddStock.textContent = 'Adicionando...';
         try {
-            const res = await fetch(`${API_URL}/system/stock`, {
+            const res = await authFetch(`${API_URL}/system/stock`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders(),
                 body: JSON.stringify({ added_grams: grams, added_cost: isNaN(cost) ? 0 : cost })
             });
             if (res.ok) {
@@ -382,9 +503,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const url = id ? `${API_URL}/users/${id}` : `${API_URL}/users`;
         const method = id ? 'PUT' : 'POST';
         try {
-            const res = await fetch(url, {
+            const res = await authFetch(url, {
                 method,
-                headers: { 'Content-Type': 'application/json' },
+                headers: authHeaders(),
                 body: JSON.stringify({ name, matricula, balance })
             });
             if (res.ok) {
@@ -402,7 +523,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =====================
-    //  GLOBAL HELPERS
+    //  GLOBALS
     // =====================
     window.editUser = function (id, name, matricula, balance) {
         userModalTitle.textContent = 'Editar Usuário';
@@ -417,7 +538,10 @@ document.addEventListener('DOMContentLoaded', () => {
     window.deleteUser = async function (id) {
         if (!confirm('Deseja realmente excluir este usuário?')) return;
         try {
-            const res = await fetch(`${API_URL}/users/${id}`, { method: 'DELETE' });
+            const res = await authFetch(`${API_URL}/users/${id}`, {
+                method: 'DELETE',
+                headers: authHeaders()
+            });
             if (res.ok) loadUsers();
             else alert('Erro ao excluir usuário');
         } catch {

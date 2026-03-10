@@ -2,10 +2,13 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
+const jwt = require('jsonwebtoken');
 const { pool, initSchema } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const JWT_SECRET = process.env.JWT_SECRET || 'mt_coffee_fallback_secret';
+const TOKEN_EXPIRY = '12h';
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -13,6 +16,73 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
+// =====================
+//  AUTH MIDDLEWARE
+// =====================
+function requireAdmin(req, res, next) {
+    const auth = req.headers['authorization'];
+    if (!auth || !auth.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Acesso restrito ao administrador.' });
+    }
+    const token = auth.slice(7);
+    try {
+        const payload = jwt.verify(token, JWT_SECRET);
+        if (payload.role !== 'admin') {
+            return res.status(403).json({ error: 'Permissão negada.' });
+        }
+        req.admin = payload;
+        next();
+    } catch {
+        return res.status(401).json({ error: 'Token inválido ou expirado.' });
+    }
+}
+
+// =====================
+//  ADMIN AUTH ROUTES
+// =====================
+app.post('/api/admin/login', async (req, res) => {
+    try {
+        const { pin } = req.body;
+        if (!pin) return res.status(400).json({ error: 'PIN é obrigatório.' });
+
+        const result = await pool.query("SELECT value FROM settings WHERE key = 'admin_pin'");
+        const storedPin = result.rows.length ? result.rows[0].value : '1234';
+
+        if (pin !== storedPin) {
+            return res.status(401).json({ error: 'PIN incorreto.' });
+        }
+
+        const token = jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
+        res.json({ success: true, token });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/admin/pin', requireAdmin, async (req, res) => {
+    try {
+        const { current_pin, new_pin } = req.body;
+        if (!new_pin || new_pin.length < 4) {
+            return res.status(400).json({ error: 'O novo PIN deve ter ao menos 4 caracteres.' });
+        }
+
+        const result = await pool.query("SELECT value FROM settings WHERE key = 'admin_pin'");
+        const storedPin = result.rows.length ? result.rows[0].value : '1234';
+
+        if (current_pin !== storedPin) {
+            return res.status(401).json({ error: 'PIN atual incorreto.' });
+        }
+
+        await pool.query("UPDATE settings SET value = $1 WHERE key = 'admin_pin'", [new_pin]);
+        res.json({ success: true, message: 'PIN atualizado com sucesso.' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// =====================
+//  SYSTEM STATE (PUBLIC)
+// =====================
 app.get('/api/system', async (req, res) => {
     try {
         const stateResult = await pool.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');
@@ -37,7 +107,10 @@ app.get('/api/system', async (req, res) => {
     }
 });
 
-app.post('/api/system/stock', async (req, res) => {
+// =====================
+//  SYSTEM ADMIN ROUTES (PROTECTED)
+// =====================
+app.post('/api/system/stock', requireAdmin, async (req, res) => {
     try {
         const { added_grams, added_cost } = req.body;
         if (!added_grams || added_grams <= 0) return res.status(400).json({ error: "Invalid grams" });
@@ -45,11 +118,8 @@ app.post('/api/system/stock', async (req, res) => {
         const stateResult = await pool.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');
         const state = stateResult.rows[0];
 
-        const currentGrams = state ? state.coffee_stock_grams : 0;
-        const currentCost = state ? state.stock_total_cost : 0;
-
-        const newGrams = currentGrams + parseFloat(added_grams);
-        const newCost = currentCost + parseFloat(added_cost || 0);
+        const newGrams = (state ? state.coffee_stock_grams : 0) + parseFloat(added_grams);
+        const newCost = (state ? state.stock_total_cost : 0) + parseFloat(added_cost || 0);
 
         await pool.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [newGrams, newCost]);
         res.json({ success: true, message: "Stock updated successfully", newStock: newGrams });
@@ -58,7 +128,7 @@ app.post('/api/system/stock', async (req, res) => {
     }
 });
 
-app.post('/api/system/qr', upload.single('qr_image'), async (req, res) => {
+app.post('/api/system/qr', requireAdmin, upload.single('qr_image'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
         const mimeType = req.file.mimetype;
@@ -71,7 +141,7 @@ app.post('/api/system/qr', upload.single('qr_image'), async (req, res) => {
     }
 });
 
-app.post('/api/system/pix', async (req, res) => {
+app.post('/api/system/pix', requireAdmin, async (req, res) => {
     try {
         const { pix_key } = req.body;
         await pool.query('UPDATE system_state SET pix_key = $1', [pix_key || '']);
@@ -81,16 +151,9 @@ app.post('/api/system/pix', async (req, res) => {
     }
 });
 
-
-app.get('/api/users', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT * FROM users ORDER BY name');
-        res.json(result.rows);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
+// =====================
+//  USERS — PUBLIC
+// =====================
 app.get('/api/users/:matricula', async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM users WHERE matricula = $1', [req.params.matricula]);
@@ -106,10 +169,7 @@ app.post('/api/users', async (req, res) => {
         const { name, matricula, balance } = req.body;
 
         if (matricula === '0000') {
-            const existing = await pool.query('SELECT * FROM users WHERE matricula = $1', ['0000']);
-            if (existing.rows.length > 0) {
-                return res.status(400).json({ error: 'Matrícula reservada para administração.' });
-            }
+            return res.status(400).json({ error: 'Matrícula reservada para administração.' });
         }
 
         const result = await pool.query(
@@ -122,7 +182,19 @@ app.post('/api/users', async (req, res) => {
     }
 });
 
-app.put('/api/users/:id', async (req, res) => {
+// =====================
+//  USERS — ADMIN ONLY
+// =====================
+app.get('/api/users', requireAdmin, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM users ORDER BY name');
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.put('/api/users/:id', requireAdmin, async (req, res) => {
     try {
         const { name, matricula, balance } = req.body;
         await pool.query(
@@ -135,7 +207,7 @@ app.put('/api/users/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/users/:id', async (req, res) => {
+app.delete('/api/users/:id', requireAdmin, async (req, res) => {
     try {
         await pool.query('DELETE FROM users WHERE id = $1', [req.params.id]);
         res.json({ success: true });
@@ -144,7 +216,10 @@ app.delete('/api/users/:id', async (req, res) => {
     }
 });
 
-app.get('/api/transactions', async (req, res) => {
+// =====================
+//  TRANSACTIONS
+// =====================
+app.get('/api/transactions', requireAdmin, async (req, res) => {
     try {
         const result = await pool.query(`
             SELECT t.*, u.name, u.matricula 
@@ -167,7 +242,7 @@ app.get('/api/transactions/:matricula', async (req, res) => {
             JOIN users u ON t.user_id = u.id 
             WHERE u.matricula = $1
             ORDER BY t.timestamp DESC
-            LIMIT 20
+            LIMIT 50
         `, [req.params.matricula]);
         res.json(result.rows);
     } catch (err) {
@@ -210,13 +285,7 @@ app.post('/api/consume', async (req, res) => {
         await client.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [newStock, newCost]);
 
         await client.query('COMMIT');
-
-        res.json({
-            success: true,
-            message: 'Coffee consumed!',
-            new_balance: user.balance - pricePerDose,
-            cost: pricePerDose
-        });
+        res.json({ success: true, message: 'Coffee consumed!', new_balance: user.balance - pricePerDose, cost: pricePerDose });
     } catch (err) {
         await client.query('ROLLBACK');
         res.status(500).json({ error: err.message });
@@ -246,12 +315,7 @@ app.post('/api/recharge', async (req, res) => {
         await client.query('INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, $3)', [user.id, amount, 'recharge']);
 
         await client.query('COMMIT');
-
-        res.json({
-            success: true,
-            message: 'Balance recharged!',
-            new_balance: user.balance + amount
-        });
+        res.json({ success: true, message: 'Balance recharged!', new_balance: user.balance + amount });
     } catch (err) {
         await client.query('ROLLBACK');
         res.status(500).json({ error: err.message });
@@ -260,8 +324,10 @@ app.post('/api/recharge', async (req, res) => {
     }
 });
 
-// --- STATS ROUTES ---
-app.get('/api/stats/monthly', async (req, res) => {
+// =====================
+//  STATS — ADMIN ONLY
+// =====================
+app.get('/api/stats/monthly', requireAdmin, async (req, res) => {
     try {
         const result = await pool.query(`
             SELECT
@@ -283,7 +349,7 @@ app.get('/api/stats/monthly', async (req, res) => {
     }
 });
 
-app.get('/api/stats/daily-average', async (req, res) => {
+app.get('/api/stats/daily-average', requireAdmin, async (req, res) => {
     try {
         const result = await pool.query(`
             SELECT
@@ -302,8 +368,7 @@ app.get('/api/stats/daily-average', async (req, res) => {
         const avg = totalDays > 0 ? (totalConsumptions / totalDays) : 0;
 
         const thisMonthResult = await pool.query(`
-            SELECT COUNT(*) AS count
-            FROM transactions
+            SELECT COUNT(*) AS count FROM transactions
             WHERE type = 'consumption'
               AND DATE_TRUNC('month', timestamp AT TIME ZONE 'America/Sao_Paulo') = DATE_TRUNC('month', NOW() AT TIME ZONE 'America/Sao_Paulo')
         `);
