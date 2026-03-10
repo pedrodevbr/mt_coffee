@@ -7,13 +7,23 @@
     <title>MT Coffee - Painel Admin</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
+        body {
+            align-items: flex-start;
+        }
+
+        .admin-wrapper {
+            width: 100%;
+            max-width: 960px;
+            margin: 40px auto;
+            padding: 30px 20px;
+        }
+
         .admin-dashboard {
             display: grid;
             grid-template-columns: 1fr;
             gap: 20px;
-            width: 100%;
-            max-width: 800px;
         }
 
         @media (min-width: 768px) {
@@ -21,8 +31,7 @@
                 grid-template-columns: 1fr 1fr;
             }
 
-            .admin-header,
-            .table-container {
+            .span-2 {
                 grid-column: span 2;
             }
         }
@@ -43,11 +52,11 @@
             color: #fff;
         }
 
-        th,
-        td {
-            padding: 12px;
+        th, td {
+            padding: 10px 12px;
             text-align: left;
             border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 0.9rem;
         }
 
         th {
@@ -65,6 +74,113 @@
             margin: 10px 0;
             color: var(--primary-color);
         }
+
+        /* KPI Cards */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 14px;
+            margin-bottom: 0;
+        }
+
+        @media (min-width: 600px) {
+            .kpi-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+
+        .kpi-card {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            border-radius: 14px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .kpi-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .kpi-value {
+            font-size: 1.7rem;
+            font-weight: 700;
+            color: var(--primary-color);
+            line-height: 1;
+        }
+
+        .kpi-sub {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* Chart containers */
+        .chart-wrap {
+            position: relative;
+            height: 220px;
+            margin-top: 16px;
+        }
+
+        .section-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .section-sub {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            margin-bottom: 0;
+        }
+
+        /* Top users bar */
+        .top-user-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .top-user-name {
+            flex: 1;
+            font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .top-user-bar-wrap {
+            flex: 2;
+            background: rgba(255,255,255,0.08);
+            border-radius: 4px;
+            height: 8px;
+            overflow: hidden;
+        }
+
+        .top-user-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-color), #d97706);
+            border-radius: 4px;
+            transition: width 0.8s ease;
+        }
+
+        .top-user-count {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--primary-color);
+            min-width: 24px;
+            text-align: right;
+        }
+
+        hr.divider {
+            border: none;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            margin: 16px 0;
+        }
     </style>
 </head>
 
@@ -75,49 +191,103 @@
         <div class="blob blob-3"></div>
     </div>
 
-    <main class="container glass-panel" style="max-width: 900px; margin: 40px auto; padding: 30px;">
-        <header class="header admin-header">
+    <div class="admin-wrapper">
+        <header class="header" style="text-align:center; margin-bottom: 28px;">
             <h1 class="logo">MT <span>Coffee</span> Admin</h1>
             <p class="subtitle">Gestão de Estoque e Usuários</p>
         </header>
 
         <div class="admin-dashboard">
-            <!-- Stock Card -->
+
+            <!-- ===== ANALYTICS SECTION ===== -->
+            <!-- KPI Row -->
+            <div class="glass-panel admin-card span-2">
+                <p class="section-title">Visão Geral</p>
+                <p class="section-sub">Dados de consumo atualizados em tempo real</p>
+                <hr class="divider">
+                <div class="kpi-grid">
+                    <div class="kpi-card">
+                        <div class="kpi-label">Média Diária</div>
+                        <div class="kpi-value" id="kpi-avg-daily">--</div>
+                        <div class="kpi-sub">doses / dia útil</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-label">Este Mês</div>
+                        <div class="kpi-value" id="kpi-this-month">--</div>
+                        <div class="kpi-sub">consumos</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-label">Total Histórico</div>
+                        <div class="kpi-value" id="kpi-total">--</div>
+                        <div class="kpi-sub">consumos registrados</div>
+                    </div>
+                    <div class="kpi-card">
+                        <div class="kpi-label">Dias com Consumo</div>
+                        <div class="kpi-value" id="kpi-days">--</div>
+                        <div class="kpi-sub">dias úteis</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Monthly Consumption Chart -->
+            <div class="glass-panel admin-card">
+                <p class="section-title">Consumos por Mês</p>
+                <p class="section-sub">Número de doses — últimos 12 meses</p>
+                <div class="chart-wrap">
+                    <canvas id="chart-monthly-count"></canvas>
+                </div>
+            </div>
+
+            <!-- Monthly Value Chart -->
+            <div class="glass-panel admin-card">
+                <p class="section-title">Valor Consumido por Mês</p>
+                <p class="section-sub">Total gasto (R$) — últimos 12 meses</p>
+                <div class="chart-wrap">
+                    <canvas id="chart-monthly-value"></canvas>
+                </div>
+            </div>
+
+            <!-- Top Users -->
+            <div class="glass-panel admin-card">
+                <p class="section-title">Maiores Consumidores</p>
+                <p class="section-sub">Últimos 30 dias</p>
+                <hr class="divider">
+                <div id="top-users-list">
+                    <p style="color: var(--text-muted); font-size: 0.85rem;">Carregando...</p>
+                </div>
+            </div>
+
+            <!-- ===== STOCK CARD ===== -->
             <div class="glass-panel admin-card">
                 <h3>Visão de Estoque</h3>
                 <div class="stock-display" id="admin-current-stock">-- g</div>
-                <p>Preço Calculado por Dose (10g): <strong id="admin-dose-price">R$ --</strong></p>
-                <hr style="border-color: rgba(255,255,255,0.1); margin: 15px 0;">
-
-                <h4>Adicionar Remessa</h4>
+                <p>Preço por Dose (10g): <strong id="admin-dose-price">R$ --</strong></p>
+                <hr class="divider">
+                <h4 style="margin-bottom: 12px;">Adicionar Remessa</h4>
                 <div class="input-group small">
                     <input type="number" id="add-grams" placeholder=" ">
-                    <label for="add-grams">Qtd em Gramas (Ex: 1000)</label>
+                    <label for="add-grams">Quantidade em Gramas</label>
                 </div>
                 <div class="input-group small">
                     <input type="number" id="add-cost" placeholder=" " step="0.01">
                     <label for="add-cost">Custo Total (R$)</label>
                 </div>
-                <button class="btn btn-primary" id="btn-add-stock" style="margin-top: 10px;">Adicionar ao
-                    Estoque</button>
+                <button class="btn btn-primary" id="btn-add-stock" style="margin-top: 10px;">Adicionar ao Estoque</button>
                 <p id="stock-msg" class="action-msg"></p>
             </div>
 
-            <!-- PIX/QR Card -->
+            <!-- PIX Card -->
             <div class="glass-panel admin-card">
                 <h3>Pagamento PIX</h3>
-                <p style="margin-bottom: 10px;">Configure os dados para recebimento das recargas.</p>
-
+                <p style="margin-bottom: 10px; color: var(--text-muted); font-size: 0.9rem;">Configure os dados para recebimento das recargas.</p>
                 <div class="input-group small">
                     <input type="text" id="pix-key-input" placeholder=" ">
                     <label for="pix-key-input">Chave PIX (E-mail, CPF, Celular...)</label>
                 </div>
                 <button class="btn btn-primary" id="btn-save-pix" style="margin-bottom: 20px; width: 100%;">Salvar Chave PIX</button>
-
                 <div class="qr-container" style="margin: 0 auto 15px auto;">
                     <img id="admin-qr-preview" src="" alt="QR Atual" style="max-width: 150px; border-radius: 8px;">
                 </div>
-
                 <div class="input-group small">
                     <input type="file" id="qr-file" accept="image/*" style="padding: 10px 0;">
                 </div>
@@ -125,12 +295,11 @@
                 <p id="qr-msg" class="action-msg"></p>
             </div>
 
-            <!-- Users Manager -->
-            <div class="glass-panel admin-card table-container">
+            <!-- Users Table -->
+            <div class="glass-panel admin-card table-container span-2">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <h3>Gestão de Usuários</h3>
-                    <button class="btn btn-outline" id="btn-new-user" style="padding: 5px 15px; font-size: 0.9em;">+
-                        Novo Usuário</button>
+                    <button class="btn btn-outline" id="btn-new-user" style="padding: 5px 15px; font-size: 0.9em; width: auto;">+ Novo Usuário</button>
                 </div>
                 <table id="users-table">
                     <thead>
@@ -142,15 +311,13 @@
                         </tr>
                     </thead>
                     <tbody id="users-tbody">
-                        <tr>
-                            <td colspan="4" style="text-align:center;">Carregando...</td>
-                        </tr>
+                        <tr><td colspan="4" style="text-align:center;">Carregando...</td></tr>
                     </tbody>
                 </table>
             </div>
 
-            <!-- Global History Manager -->
-            <div class="glass-panel admin-card table-container">
+            <!-- Global History -->
+            <div class="glass-panel admin-card table-container span-2">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                     <h3>Histórico Global de Transações</h3>
                 </div>
@@ -165,26 +332,23 @@
                         </tr>
                     </thead>
                     <tbody id="history-tbody">
-                        <tr>
-                            <td colspan="5" style="text-align:center;">Carregando...</td>
-                        </tr>
+                        <tr><td colspan="5" style="text-align:center;">Carregando...</td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
 
         <div style="text-align: center; margin-top: 30px;">
-            <a href="/" class="btn btn-outline" style="text-decoration: none;">Ir para a Página Principal</a>
+            <a href="/" class="btn btn-outline" style="text-decoration: none; width: auto; padding: 10px 24px;">Ir para a Página Principal</a>
         </div>
-    </main>
+    </div>
 
-    <!-- New User Modal -->
+    <!-- New/Edit User Modal -->
     <div class="modal hidden" id="user-modal">
         <div class="modal-content glass-panel">
             <span class="close-btn" id="close-user-modal">&times;</span>
             <h2 id="user-modal-title">Novo Usuário</h2>
             <input type="hidden" id="edit-user-id" value="">
-
             <div class="input-group small">
                 <input type="text" id="new-user-name" placeholder=" ">
                 <label for="new-user-name">Nome Completo</label>
@@ -197,7 +361,6 @@
                 <input type="number" id="new-user-balance" placeholder=" " step="0.01" value="0">
                 <label for="new-user-balance">Saldo (R$)</label>
             </div>
-
             <button class="btn btn-primary" id="btn-save-user">Cadastrar Usuário</button>
             <p id="user-msg" class="action-msg"></p>
         </div>

@@ -260,6 +260,77 @@ app.post('/api/recharge', async (req, res) => {
     }
 });
 
+// --- STATS ROUTES ---
+app.get('/api/stats/monthly', async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT
+                TO_CHAR(timestamp AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') AS month,
+                TO_CHAR(timestamp AT TIME ZONE 'America/Sao_Paulo', 'Mon/YY') AS label,
+                COUNT(*) FILTER (WHERE type = 'consumption') AS consumption_count,
+                COALESCE(ABS(SUM(amount) FILTER (WHERE type = 'consumption')), 0) AS total_consumed_value,
+                COALESCE(SUM(amount) FILTER (WHERE type = 'recharge'), 0) AS total_recharged
+            FROM transactions
+            WHERE timestamp >= NOW() - INTERVAL '12 months'
+            GROUP BY
+                TO_CHAR(timestamp AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM'),
+                TO_CHAR(timestamp AT TIME ZONE 'America/Sao_Paulo', 'Mon/YY')
+            ORDER BY month ASC
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/stats/daily-average', async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT
+                DATE(timestamp AT TIME ZONE 'America/Sao_Paulo') AS day,
+                COUNT(*) AS count
+            FROM transactions
+            WHERE type = 'consumption'
+              AND EXTRACT(DOW FROM timestamp AT TIME ZONE 'America/Sao_Paulo') BETWEEN 1 AND 5
+            GROUP BY DATE(timestamp AT TIME ZONE 'America/Sao_Paulo')
+            ORDER BY day ASC
+        `);
+
+        const rows = result.rows;
+        const totalDays = rows.length;
+        const totalConsumptions = rows.reduce((sum, r) => sum + parseInt(r.count), 0);
+        const avg = totalDays > 0 ? (totalConsumptions / totalDays) : 0;
+
+        const thisMonthResult = await pool.query(`
+            SELECT COUNT(*) AS count
+            FROM transactions
+            WHERE type = 'consumption'
+              AND DATE_TRUNC('month', timestamp AT TIME ZONE 'America/Sao_Paulo') = DATE_TRUNC('month', NOW() AT TIME ZONE 'America/Sao_Paulo')
+        `);
+
+        const topUsersResult = await pool.query(`
+            SELECT u.name, u.matricula, COUNT(*) AS consumption_count
+            FROM transactions t
+            JOIN users u ON t.user_id = u.id
+            WHERE t.type = 'consumption'
+              AND t.timestamp >= NOW() - INTERVAL '30 days'
+            GROUP BY u.id, u.name, u.matricula
+            ORDER BY consumption_count DESC
+            LIMIT 5
+        `);
+
+        res.json({
+            avg_daily_business_days: parseFloat(avg.toFixed(2)),
+            total_business_days_with_consumption: totalDays,
+            total_consumptions_overall: totalConsumptions,
+            this_month_consumptions: parseInt(thisMonthResult.rows[0].count),
+            top_users_last_30_days: topUsersResult.rows
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.use((req, res) => {
     if (req.accepts('html')) {
         res.sendFile(path.join(__dirname, 'public', 'index.html'));
