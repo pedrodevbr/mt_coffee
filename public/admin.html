@@ -293,12 +293,22 @@
                                 <th>Gramas</th>
                                 <th>Custo (R$)</th>
                                 <th>R$/kg</th>
+                                <th>Preço/Dose</th>
                             </tr>
                         </thead>
                         <tbody id="stock-history-body">
-                            <tr><td colspan="4" style="text-align:center; color: var(--text-muted);">Carregando...</td></tr>
+                            <tr><td colspan="5" style="text-align:center; color: var(--text-muted);">Carregando...</td></tr>
                         </tbody>
                     </table>
+                </div>
+            </div>
+
+            <!-- Price History Chart -->
+            <div class="glass-panel admin-card">
+                <p class="section-title">Histórico de Preço da Dose</p>
+                <p class="section-sub">Evolução do preço por dose (10g) a cada remessa</p>
+                <div class="chart-wrap">
+                    <canvas id="chart-price-history"></canvas>
                 </div>
             </div>
 
@@ -411,11 +421,9 @@
                     <label for="pin-input">PIN de administrador</label>
                 </div>
                 <p id="pin-error" style="color: var(--danger); font-size: 0.85rem; min-height: 18px; margin-bottom: 10px;"></p>
+                <a href="/" style="display: block; color: var(--text-muted); font-size: 0.85rem; text-decoration: none; margin-bottom: 12px;">← Ir para a página principal</a>
                 <button type="submit" class="btn btn-primary" id="btn-pin-login">Entrar</button>
             </form>
-            <div style="margin-top: 20px;">
-                <a href="/" style="color: var(--text-muted); font-size: 0.85rem; text-decoration: none;">← Voltar para a página principal</a>
-            </div>
         </div>
     </div>
 

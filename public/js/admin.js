@@ -190,6 +190,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let chartCount = null;
     let chartValue = null;
+    let chartPrice = null;
 
     // =====================
     //  INIT
@@ -200,6 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadHistory();
         loadStats();
         loadStockHistory();
+        loadPriceHistory();
     }
 
     // Check token on load
@@ -351,22 +353,79 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!res.ok) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">Sem dados</td></tr>'; return; }
             const rows = await res.json();
             if (rows.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">Nenhuma remessa registrada ainda.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">Nenhuma remessa registrada ainda.</td></tr>';
                 return;
             }
             tbody.innerHTML = rows.map(r => {
                 const date = new Date(r.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
                 const costPer = parseFloat(r.cost_per_kg).toFixed(2).replace('.', ',');
                 const cost = parseFloat(r.added_cost).toFixed(2).replace('.', ',');
+                const price = parseFloat(r.price_per_dose || 0).toFixed(3).replace('.', ',');
                 return `<tr>
                     <td>${date}</td>
                     <td>${parseFloat(r.added_grams).toFixed(0)} g</td>
                     <td>R$ ${cost}</td>
                     <td>R$ ${costPer}</td>
+                    <td>R$ ${price}</td>
                 </tr>`;
             }).join('');
         } catch (err) {
-            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--danger)">Erro ao carregar histórico</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger)">Erro ao carregar histórico</td></tr>';
+        }
+    }
+
+    async function loadPriceHistory() {
+        const canvas = document.getElementById('chart-price-history');
+        if (!canvas) return;
+        try {
+            const res = await authFetch(`${API_URL}/admin/stock-history`);
+            if (!res.ok) return;
+            const rows = await res.json();
+            if (rows.length === 0) return;
+
+            const sorted = [...rows].reverse();
+            const labels = sorted.map(r => new Date(r.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }));
+            const prices = sorted.map(r => parseFloat(parseFloat(r.price_per_dose || 0).toFixed(4)));
+
+            const gridColor = 'rgba(255,255,255,0.07)';
+            const tickColor = '#94a3b8';
+            const green = '#22c55e';
+
+            if (chartPrice) chartPrice.destroy();
+            chartPrice = new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        data: prices,
+                        borderColor: green,
+                        backgroundColor: `${green}22`,
+                        borderWidth: 2,
+                        pointBackgroundColor: green,
+                        pointRadius: 4,
+                        tension: 0.3,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { callbacks: { label: ctx => `R$ ${ctx.parsed.y.toFixed(3).replace('.', ',')}` } }
+                    },
+                    scales: {
+                        x: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: gridColor } },
+                        y: {
+                            ticks: { color: tickColor, font: { size: 10 }, callback: v => `R$${v.toFixed(2)}` },
+                            grid: { color: gridColor },
+                            beginAtZero: false
+                        }
+                    }
+                }
+            });
+        } catch (err) {
+            console.error('Error loading price history:', err);
         }
     }
 
@@ -507,6 +566,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 addCostInput.value = '';
                 loadSystemState();
                 loadStockHistory();
+                loadPriceHistory();
             }
         } catch {
             showMessage(stockMsg, 'Erro de conexão', true);

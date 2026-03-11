@@ -125,7 +125,12 @@ app.post('/api/system/stock', requireAdmin, async (req, res) => {
         const newCost = (state ? state.stock_total_cost : 0) + cost;
 
         await pool.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [newGrams, newCost]);
-        await pool.query('INSERT INTO stock_history (added_grams, added_cost) VALUES ($1, $2)', [grams, cost]);
+
+        const doseResult = await pool.query("SELECT value FROM settings WHERE key = 'dose_grams'");
+        const doseGrams = doseResult.rows.length ? parseFloat(doseResult.rows[0].value) : 10;
+        const pricePerDose = newGrams > 0 ? (newCost / newGrams) * doseGrams : 0;
+
+        await pool.query('INSERT INTO stock_history (added_grams, added_cost, price_per_dose) VALUES ($1, $2, $3)', [grams, cost, pricePerDose]);
 
         res.json({ success: true, message: "Stock updated successfully", newStock: newGrams });
     } catch (err) {
@@ -136,7 +141,7 @@ app.post('/api/system/stock', requireAdmin, async (req, res) => {
 app.get('/api/admin/stock-history', requireAdmin, async (req, res) => {
     try {
         const result = await pool.query(`
-            SELECT id, added_grams, added_cost,
+            SELECT id, added_grams, added_cost, price_per_dose,
                    CASE WHEN added_grams > 0 THEN ROUND((added_cost / added_grams * 1000)::numeric, 2) ELSE 0 END AS cost_per_kg,
                    timestamp
             FROM stock_history

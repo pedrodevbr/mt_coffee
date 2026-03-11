@@ -49,8 +49,12 @@ async function initSchema() {
                 id SERIAL PRIMARY KEY,
                 added_grams REAL NOT NULL,
                 added_cost REAL NOT NULL DEFAULT 0,
+                price_per_dose REAL DEFAULT 0,
                 timestamp TIMESTAMPTZ DEFAULT NOW()
             )
+        `);
+        await client.query(`
+            ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS price_per_dose REAL DEFAULT 0
         `);
 
         const stateCount = await client.query('SELECT COUNT(*) as count FROM system_state');
