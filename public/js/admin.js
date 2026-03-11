@@ -230,6 +230,18 @@ document.addEventListener('DOMContentLoaded', () => {
     closeUserModal.addEventListener('click', () => userModal.classList.add('hidden'));
     btnSaveUser.addEventListener('click', handleSaveUser);
 
+    const btnToggleHistory = document.getElementById('btn-toggle-history');
+    const historyCollapsible = document.getElementById('history-collapsible');
+    const historyToggleIcon = document.getElementById('history-toggle-icon');
+    if (btnToggleHistory) {
+        btnToggleHistory.addEventListener('click', () => {
+            const isOpen = historyCollapsible.style.display !== 'none';
+            historyCollapsible.style.display = isOpen ? 'none' : 'block';
+            historyToggleIcon.style.transform = isOpen ? '' : 'rotate(180deg)';
+            btnToggleHistory.setAttribute('aria-expanded', String(!isOpen));
+        });
+    }
+
     // =====================
     //  ANALYTICS / STATS
     // =====================
