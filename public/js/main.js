@@ -44,6 +44,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnDownloadQr = document.getElementById('btn-download-qr');
     const downloadQrContainer = document.getElementById('download-qr-container');
     const rechargeAmount = document.getElementById('recharge-amount');
+    const receiptFile = document.getElementById('receipt-file');
+    const receiptUploadMsg = document.getElementById('receipt-upload-msg');
+    const userReceiptsWrap = document.getElementById('user-receipts-wrap');
+    const userReceiptsList = document.getElementById('user-receipts-list');
     const btnConfirmRecharge = document.getElementById('btn-confirm-recharge');
 
     // Init
@@ -77,7 +81,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     btnShowRecharge.addEventListener('click', () => {
         rechargeAmount.value = '';
+        receiptFile.value = '';
+        receiptUploadMsg.textContent = '';
         rechargeModal.classList.remove('hidden');
+        if (currentUser) loadUserReceipts();
     });
 
     closeModalBtn.addEventListener('click', () => {
@@ -270,34 +277,73 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function handleRecharge() {
         const amount = parseFloat(rechargeAmount.value);
+        const file = receiptFile.files[0];
         if (isNaN(amount) || amount <= 0) {
-            alert('Por favor, insira um valor válido de recarga.');
+            receiptUploadMsg.style.color = 'var(--danger)';
+            receiptUploadMsg.textContent = 'Informe o valor pago.';
+            return;
+        }
+        if (!file) {
+            receiptUploadMsg.style.color = 'var(--danger)';
+            receiptUploadMsg.textContent = 'Selecione o arquivo do comprovante.';
             return;
         }
         btnConfirmRecharge.disabled = true;
-        btnConfirmRecharge.textContent = 'Processando...';
+        btnConfirmRecharge.textContent = 'Enviando...';
+        receiptUploadMsg.textContent = '';
         try {
-            const res = await fetch(`${API_URL}/recharge`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ matricula: currentUser.matricula, amount: amount })
-            });
+            const formData = new FormData();
+            formData.append('matricula', currentUser.matricula);
+            formData.append('amount_declared', amount);
+            formData.append('comprovante', file);
+            const res = await fetch(`${API_URL}/receipts`, { method: 'POST', body: formData });
             const data = await res.json();
             if (res.ok) {
-                currentUser.balance = data.new_balance;
-                updateBalanceUI();
-                rechargeModal.classList.add('hidden');
-                showActionMsg(`Recarga de R$ ${amount.toFixed(2).replace('.', ',')} confirmada!`);
-                if (!historyContainer.classList.contains('hidden')) loadHistory();
+                rechargeAmount.value = '';
+                receiptFile.value = '';
+                receiptUploadMsg.style.color = 'var(--success)';
+                receiptUploadMsg.textContent = '✓ Comprovante enviado! Aguardando aprovação.';
+                loadUserReceipts();
             } else {
-                alert(data.error || 'Erro ao processar recarga');
+                receiptUploadMsg.style.color = 'var(--danger)';
+                receiptUploadMsg.textContent = data.error || 'Erro ao enviar comprovante.';
             }
         } catch (error) {
-            alert('Erro de conexão.');
+            receiptUploadMsg.style.color = 'var(--danger)';
+            receiptUploadMsg.textContent = 'Erro de conexão.';
         } finally {
             btnConfirmRecharge.disabled = false;
-            btnConfirmRecharge.textContent = 'Confirmar Recarga';
+            btnConfirmRecharge.textContent = 'Enviar Comprovante';
         }
+    }
+
+    async function loadUserReceipts() {
+        if (!currentUser) return;
+        try {
+            const res = await fetch(`${API_URL}/receipts/${currentUser.matricula}`);
+            if (!res.ok) return;
+            const receipts = await res.json();
+            if (receipts.length === 0) {
+                userReceiptsWrap.style.display = 'none';
+                return;
+            }
+            userReceiptsWrap.style.display = 'block';
+            const statusMap = { pending: ['⏳ Pendente', '#f59e0b'], approved: ['✓ Aprovado', 'var(--success)'], rejected: ['✗ Rejeitado', 'var(--danger)'] };
+            userReceiptsList.innerHTML = receipts.map(r => {
+                const [label, color] = statusMap[r.status] || ['--', '#fff'];
+                const date = new Date(r.created_at).toLocaleDateString('pt-BR');
+                const amtDeclared = parseFloat(r.amount_declared).toFixed(2).replace('.', ',');
+                const amtApproved = r.amount_approved ? ` → aprovado R$ ${parseFloat(r.amount_approved).toFixed(2).replace('.', ',')}` : '';
+                const note = r.notes ? `<span style="color:var(--danger); font-size:0.78rem;"> · ${r.notes}</span>` : '';
+                return `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.07);">
+                    <div>
+                        <span style="font-weight:500;">R$ ${amtDeclared}${amtApproved}</span>
+                        <span style="color:var(--text-muted); font-size:0.78rem; margin-left:6px;">${date}</span>${note}
+                    </div>
+                    <span style="color:${color}; font-size:0.82rem; white-space:nowrap; margin-left:8px;">${label}</span>
+                </div>`;
+            }).join('');
+        } catch {}
     }
 
     async function handleToggleHistory() {

@@ -178,6 +178,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnNewUser = document.getElementById('btn-new-user');
     const historyTbody = document.getElementById('history-tbody');
 
+    const receiptsTbody = document.getElementById('receipts-tbody');
+    const receiptsPendingBadge = document.getElementById('receipts-pending-badge');
+    const approveReceiptModal = document.getElementById('approve-receipt-modal');
+    const closeApproveModal = document.getElementById('close-approve-modal');
+    const approveReceiptId = document.getElementById('approve-receipt-id');
+    const approveUserName = document.getElementById('approve-user-name');
+    const approveDeclaredAmount = document.getElementById('approve-declared-amount');
+    const approveViewFile = document.getElementById('approve-view-file');
+    const approveAmountInput = document.getElementById('approve-amount-input');
+    const approveMsg = document.getElementById('approve-msg');
+    const btnConfirmApprove = document.getElementById('btn-confirm-approve');
+    const btnConfirmReject = document.getElementById('btn-confirm-reject');
+
     const txModal = document.getElementById('tx-modal');
     const closeTxModal = document.getElementById('close-tx-modal');
     const txEditId = document.getElementById('tx-edit-id');
@@ -216,6 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadStockHistory();
         loadPriceHistory();
         loadBalanceCard();
+        loadReceipts();
     }
 
     // Check token on load
@@ -516,6 +530,134 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Error loading balance card:', err);
         }
     }
+
+    // =====================
+    //  RECEIPTS
+    // =====================
+    let allReceipts = [];
+    let currentReceiptFilter = 'pending';
+
+    async function loadReceipts() {
+        try {
+            const res = await authFetch(`${API_URL}/admin/receipts`);
+            if (!res.ok) return;
+            allReceipts = await res.json();
+            const pendingCount = allReceipts.filter(r => r.status === 'pending').length;
+            if (pendingCount > 0) {
+                receiptsPendingBadge.textContent = `${pendingCount} pendente${pendingCount > 1 ? 's' : ''}`;
+                receiptsPendingBadge.style.display = 'inline-block';
+            } else {
+                receiptsPendingBadge.style.display = 'none';
+            }
+            renderReceipts(currentReceiptFilter);
+        } catch (err) {
+            receiptsTbody.innerHTML = '<tr><td colspan="6">Erro ao carregar comprovantes.</td></tr>';
+        }
+    }
+
+    function renderReceipts(filter) {
+        currentReceiptFilter = filter;
+        const filtered = filter === 'all' ? allReceipts : allReceipts.filter(r => r.status === filter);
+        if (filtered.length === 0) {
+            receiptsTbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">Nenhum comprovante ${filter === 'pending' ? 'pendente' : filter === 'approved' ? 'aprovado' : filter === 'rejected' ? 'rejeitado' : ''}.</td></tr>`;
+            return;
+        }
+        const statusStyles = {
+            pending: ['⏳ Pendente', '#f59e0b'],
+            approved: ['✓ Aprovado', '#4ade80'],
+            rejected: ['✗ Rejeitado', '#f87171']
+        };
+        receiptsTbody.innerHTML = filtered.map(r => {
+            const [statusLabel, statusColor] = statusStyles[r.status] || ['--', '#fff'];
+            const date = new Date(r.created_at).toLocaleDateString('pt-BR');
+            const amt = `R$ ${parseFloat(r.amount_declared).toFixed(2).replace('.', ',')}`;
+            const approvedAmt = r.amount_approved ? `<br><span style="font-size:0.78rem; color:#4ade80;">Aprovado: R$ ${parseFloat(r.amount_approved).toFixed(2).replace('.', ',')}</span>` : '';
+            const noteCell = r.notes ? `<br><span style="font-size:0.78rem; color:#f87171;">${r.notes}</span>` : '';
+            const reviewBtn = r.status === 'pending'
+                ? `<button class="btn-review-receipt" data-id="${r.id}" data-user="${r.name}" data-amt="${r.amount_declared}" style="background:none; border:1px solid #f59e0b; color:#f59e0b; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:0.8rem;">Revisar</button>`
+                : '';
+            return `<tr>
+                <td>${date}</td>
+                <td>${r.name}</td>
+                <td>${r.matricula}</td>
+                <td>${amt}${approvedAmt}${noteCell}</td>
+                <td style="color:${statusColor}; font-weight:600;">${statusLabel}</td>
+                <td>${reviewBtn}</td>
+            </tr>`;
+        }).join('');
+        receiptsTbody.querySelectorAll('.btn-review-receipt').forEach(btn => {
+            btn.addEventListener('click', () => openApproveModal(btn.dataset.id, btn.dataset.user, btn.dataset.amt));
+        });
+    }
+
+    document.querySelectorAll('[data-filter]').forEach(btn => {
+        btn.addEventListener('click', () => renderReceipts(btn.dataset.filter));
+    });
+
+    function openApproveModal(id, userName, declared) {
+        approveReceiptId.value = id;
+        approveUserName.textContent = userName;
+        approveDeclaredAmount.textContent = `R$ ${parseFloat(declared).toFixed(2).replace('.', ',')}`;
+        approveAmountInput.value = parseFloat(declared).toFixed(2);
+        approveMsg.textContent = '';
+        approveViewFile.href = `/api/admin/receipts/${id}/file?token=${getToken()}`;
+        approveReceiptModal.classList.remove('hidden');
+    }
+
+    closeApproveModal.addEventListener('click', () => approveReceiptModal.classList.add('hidden'));
+    approveReceiptModal.addEventListener('click', e => { if (e.target === approveReceiptModal) approveReceiptModal.classList.add('hidden'); });
+
+    btnConfirmApprove.addEventListener('click', async () => {
+        const id = approveReceiptId.value;
+        const amount = parseFloat(approveAmountInput.value);
+        if (isNaN(amount) || amount <= 0) {
+            approveMsg.style.color = '#f87171';
+            approveMsg.textContent = 'Informe um valor válido.';
+            return;
+        }
+        btnConfirmApprove.disabled = true;
+        btnConfirmApprove.textContent = 'Aprovando...';
+        try {
+            const res = await authFetch(`${API_URL}/admin/receipts/${id}/approve`, {
+                method: 'PUT',
+                headers: authHeaders(),
+                body: JSON.stringify({ amount_approved: amount })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                approveReceiptModal.classList.add('hidden');
+                loadReceipts();
+                loadUsers();
+                loadBalanceCard();
+            } else {
+                approveMsg.style.color = '#f87171';
+                approveMsg.textContent = data.error || 'Erro ao aprovar.';
+            }
+        } catch {
+            approveMsg.style.color = '#f87171';
+            approveMsg.textContent = 'Erro de conexão.';
+        } finally {
+            btnConfirmApprove.disabled = false;
+            btnConfirmApprove.textContent = 'Confirmar Aprovação';
+        }
+    });
+
+    btnConfirmReject.addEventListener('click', async () => {
+        const notes = prompt('Motivo da rejeição (opcional):');
+        if (notes === null) return;
+        const id = approveReceiptId.value;
+        try {
+            const res = await authFetch(`${API_URL}/admin/receipts/${id}/reject`, {
+                method: 'PUT',
+                headers: authHeaders(),
+                body: JSON.stringify({ notes: notes || null })
+            });
+            if (res.ok) {
+                approveReceiptModal.classList.add('hidden');
+                loadReceipts();
+            }
+        } catch {}
+    });
 
     async function handleSavePix() {
         const pix_key = pixKeyInput.value.trim();

@@ -57,6 +57,23 @@ async function initSchema() {
             ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS price_per_dose REAL DEFAULT 0
         `);
 
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS payment_receipts (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                amount_declared REAL NOT NULL,
+                amount_approved REAL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                file_path TEXT NOT NULL,
+                file_name TEXT NOT NULL,
+                file_type TEXT NOT NULL,
+                notes TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                reviewed_at TIMESTAMPTZ,
+                reviewed_by TEXT
+            )
+        `);
+
         const stateCount = await client.query('SELECT COUNT(*) as count FROM system_state');
         if (parseInt(stateCount.rows[0].count) === 0) {
             await client.query("INSERT INTO system_state (coffee_stock_grams, stock_total_cost, qr_code_url, pix_key) VALUES (0, 0, '', '')");

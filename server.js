@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const { pool, initSchema } = require('./database');
 
@@ -16,15 +17,36 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
 
+const receiptsDir = path.join(__dirname, 'uploads', 'receipts');
+if (!fs.existsSync(receiptsDir)) fs.mkdirSync(receiptsDir, { recursive: true });
+
+const receiptStorage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, receiptsDir),
+    filename: (req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        cb(null, `receipt_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
+    }
+});
+const uploadReceipt = multer({
+    storage: receiptStorage,
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
+        if (allowed.includes(file.mimetype)) cb(null, true);
+        else cb(new Error('Tipo de arquivo não permitido. Use imagem ou PDF.'));
+    }
+});
+
 // =====================
 //  AUTH MIDDLEWARE
 // =====================
 function requireAdmin(req, res, next) {
     const auth = req.headers['authorization'];
-    if (!auth || !auth.startsWith('Bearer ')) {
+    const queryToken = req.query.token;
+    const token = (auth && auth.startsWith('Bearer ')) ? auth.slice(7) : queryToken;
+    if (!token) {
         return res.status(401).json({ error: 'Acesso restrito ao administrador.' });
     }
-    const token = auth.slice(7);
     try {
         const payload = jwt.verify(token, JWT_SECRET);
         if (payload.role !== 'admin') {
@@ -454,6 +476,133 @@ app.delete('/api/admin/transactions/:id', requireAdmin, async (req, res) => {
         res.status(500).json({ error: err.message });
     } finally {
         client.release();
+    }
+});
+
+// =====================
+//  PAYMENT RECEIPTS
+// =====================
+
+app.post('/api/receipts', uploadReceipt.single('comprovante'), async (req, res) => {
+    try {
+        const { matricula, amount_declared } = req.body;
+        if (!matricula || !amount_declared || !req.file) {
+            if (req.file) fs.unlinkSync(req.file.path);
+            return res.status(400).json({ error: 'Matrícula, valor e comprovante são obrigatórios.' });
+        }
+        const amount = parseFloat(amount_declared);
+        if (isNaN(amount) || amount <= 0) {
+            fs.unlinkSync(req.file.path);
+            return res.status(400).json({ error: 'Valor inválido.' });
+        }
+        const userResult = await pool.query('SELECT id FROM users WHERE matricula=$1', [matricula]);
+        if (userResult.rows.length === 0) {
+            fs.unlinkSync(req.file.path);
+            return res.status(404).json({ error: 'Usuário não encontrado.' });
+        }
+        const userId = userResult.rows[0].id;
+        await pool.query(
+            `INSERT INTO payment_receipts (user_id, amount_declared, file_path, file_name, file_type)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [userId, amount, req.file.filename, req.file.originalname, req.file.mimetype]
+        );
+        res.json({ success: true, message: 'Comprovante enviado! Aguardando aprovação do administrador.' });
+    } catch (err) {
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/receipts/:matricula', async (req, res) => {
+    try {
+        const userResult = await pool.query('SELECT id FROM users WHERE matricula=$1', [req.params.matricula]);
+        if (userResult.rows.length === 0) return res.status(404).json({ error: 'Usuário não encontrado.' });
+        const result = await pool.query(
+            `SELECT id, amount_declared, amount_approved, status, file_name, notes, created_at, reviewed_at
+             FROM payment_receipts WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20`,
+            [userResult.rows[0].id]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/admin/receipts', requireAdmin, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT pr.*, u.name, u.matricula
+            FROM payment_receipts pr
+            JOIN users u ON pr.user_id = u.id
+            ORDER BY pr.created_at DESC
+        `);
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/admin/receipts/:id/file', requireAdmin, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT file_path, file_name, file_type FROM payment_receipts WHERE id=$1', [req.params.id]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Comprovante não encontrado.' });
+        const { file_path, file_name, file_type } = result.rows[0];
+        const fullPath = path.join(receiptsDir, file_path);
+        if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Arquivo não encontrado no servidor.' });
+        res.setHeader('Content-Type', file_type);
+        res.setHeader('Content-Disposition', `inline; filename="${file_name}"`);
+        fs.createReadStream(fullPath).pipe(res);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.put('/api/admin/receipts/:id/approve', requireAdmin, async (req, res) => {
+    const { amount_approved } = req.body;
+    const amount = parseFloat(amount_approved);
+    if (isNaN(amount) || amount <= 0) return res.status(400).json({ error: 'Valor aprovado inválido.' });
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const receipt = await client.query(
+            'SELECT * FROM payment_receipts WHERE id=$1 AND status=$2',
+            [req.params.id, 'pending']
+        );
+        if (receipt.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Comprovante não encontrado ou já processado.' }); }
+        const { user_id } = receipt.rows[0];
+        await client.query(
+            `UPDATE payment_receipts SET status='approved', amount_approved=$1, reviewed_at=NOW(), reviewed_by='admin' WHERE id=$2`,
+            [amount, req.params.id]
+        );
+        await client.query(
+            'INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, $3)',
+            [user_id, amount, 'recharge']
+        );
+        await client.query(
+            'UPDATE users SET balance = balance + $1 WHERE id = $2',
+            [amount, user_id]
+        );
+        await client.query('COMMIT');
+        res.json({ success: true });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+app.put('/api/admin/receipts/:id/reject', requireAdmin, async (req, res) => {
+    const { notes } = req.body;
+    try {
+        const result = await pool.query(
+            `UPDATE payment_receipts SET status='rejected', notes=$1, reviewed_at=NOW(), reviewed_by='admin' WHERE id=$2 AND status='pending' RETURNING id`,
+            [notes || null, req.params.id]
+        );
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Comprovante não encontrado ou já processado.' });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 
