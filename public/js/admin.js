@@ -178,6 +178,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnNewUser = document.getElementById('btn-new-user');
     const historyTbody = document.getElementById('history-tbody');
 
+    const txModal = document.getElementById('tx-modal');
+    const closeTxModal = document.getElementById('close-tx-modal');
+    const txEditId = document.getElementById('tx-edit-id');
+    const txEditUser = document.getElementById('tx-edit-user');
+    const txEditType = document.getElementById('tx-edit-type');
+    const txEditAmount = document.getElementById('tx-edit-amount');
+    const txEditTimestamp = document.getElementById('tx-edit-timestamp');
+    const txEditMsg = document.getElementById('tx-edit-msg');
+    const btnSaveTx = document.getElementById('btn-save-tx');
+    const btnDeleteTx = document.getElementById('btn-delete-tx');
+
     const userModal = document.getElementById('user-modal');
     const closeUserModal = document.getElementById('close-user-modal');
     const newUserName = document.getElementById('new-user-name');
@@ -568,6 +579,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderUsers(users) {
+        cachedUsers = users;
         usersTbody.innerHTML = '';
         if (users.length === 0) {
             usersTbody.innerHTML = '<tr><td colspan="4" style="text-align:center">Nenhum usuário cadastrado.</td></tr>';
@@ -603,7 +615,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderHistory(transactions) {
         historyTbody.innerHTML = '';
         if (transactions.length === 0) {
-            historyTbody.innerHTML = '<tr><td colspan="5" style="text-align:center">Nenhuma transação registrada.</td></tr>';
+            historyTbody.innerHTML = '<tr><td colspan="6" style="text-align:center">Nenhuma transação registrada.</td></tr>';
             return;
         }
         transactions.forEach(t => {
@@ -615,10 +627,104 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${t.name}</td>
                 <td>${t.matricula}</td>
                 <td>${isRecharge ? 'Recarga' : 'Consumo'}</td>
-                <td style="color: ${isRecharge ? 'var(--success)' : '#fff'}">${isRecharge ? '+' : '-'} R$ ${Math.abs(t.amount).toFixed(2).replace('.', ',')}</td>`;
+                <td style="color: ${isRecharge ? 'var(--success)' : '#fff'}">${isRecharge ? '+' : '-'} R$ ${Math.abs(t.amount).toFixed(2).replace('.', ',')}</td>
+                <td style="text-align:center;">
+                    <button class="btn-edit-tx" data-id="${t.id}" data-user="${t.user_id}" data-type="${t.type}" data-amount="${Math.abs(t.amount)}" data-ts="${t.timestamp}" title="Editar" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:1rem;padding:2px 6px;border-radius:5px;transition:color .2s;">✏️</button>
+                </td>`;
             historyTbody.appendChild(tr);
         });
+        historyTbody.querySelectorAll('.btn-edit-tx').forEach(btn => {
+            btn.addEventListener('click', () => openTxModal(btn.dataset));
+        });
     }
+
+    let cachedUsers = [];
+
+    function openTxModal(data) {
+        txEditId.value = data.id;
+        txEditType.value = data.type;
+        txEditAmount.value = parseFloat(data.amount).toFixed(2);
+        const localDt = new Date(data.ts);
+        localDt.setMinutes(localDt.getMinutes() - localDt.getTimezoneOffset());
+        txEditTimestamp.value = localDt.toISOString().slice(0, 16);
+        txEditMsg.textContent = '';
+
+        txEditUser.innerHTML = '<option value="">Selecionar usuário...</option>';
+        cachedUsers.forEach(u => {
+            const opt = document.createElement('option');
+            opt.value = u.id;
+            opt.textContent = `${u.name} (${u.matricula})`;
+            if (String(u.id) === String(data.user)) opt.selected = true;
+            txEditUser.appendChild(opt);
+        });
+
+        txModal.classList.remove('hidden');
+    }
+
+    closeTxModal.addEventListener('click', () => txModal.classList.add('hidden'));
+    txModal.addEventListener('click', e => { if (e.target === txModal) txModal.classList.add('hidden'); });
+
+    btnSaveTx.addEventListener('click', async () => {
+        const id = txEditId.value;
+        const user_id = txEditUser.value;
+        const type = txEditType.value;
+        const amount = parseFloat(txEditAmount.value);
+        const timestamp = txEditTimestamp.value;
+        if (!user_id || !timestamp || isNaN(amount) || amount <= 0) {
+            txEditMsg.style.color = '#f87171';
+            txEditMsg.textContent = 'Preencha todos os campos corretamente.';
+            return;
+        }
+        btnSaveTx.disabled = true;
+        btnSaveTx.textContent = 'Salvando...';
+        try {
+            const res = await authFetch(`${API_URL}/admin/transactions/${id}`, {
+                method: 'PUT',
+                headers: authHeaders(),
+                body: JSON.stringify({ user_id: parseInt(user_id), type, amount, timestamp })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                txModal.classList.add('hidden');
+                loadHistory();
+                loadUsers();
+                loadBalanceCard();
+            } else {
+                txEditMsg.style.color = '#f87171';
+                txEditMsg.textContent = data.error || 'Erro ao salvar.';
+            }
+        } catch {
+            txEditMsg.style.color = '#f87171';
+            txEditMsg.textContent = 'Erro de conexão.';
+        } finally {
+            btnSaveTx.disabled = false;
+            btnSaveTx.textContent = 'Salvar';
+        }
+    });
+
+    btnDeleteTx.addEventListener('click', async () => {
+        if (!confirm('Excluir esta transação? O saldo do usuário será recalculado.')) return;
+        const id = txEditId.value;
+        btnDeleteTx.disabled = true;
+        try {
+            const res = await authFetch(`${API_URL}/admin/transactions/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                txModal.classList.add('hidden');
+                loadHistory();
+                loadUsers();
+                loadBalanceCard();
+            } else {
+                const d = await res.json();
+                txEditMsg.style.color = '#f87171';
+                txEditMsg.textContent = d.error || 'Erro ao excluir.';
+            }
+        } catch {
+            txEditMsg.style.color = '#f87171';
+            txEditMsg.textContent = 'Erro de conexão.';
+        } finally {
+            btnDeleteTx.disabled = false;
+        }
+    });
 
     // =====================
     //  STOCK

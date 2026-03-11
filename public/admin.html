@@ -493,10 +493,11 @@
                                 <th>Matrícula</th>
                                 <th>Tipo</th>
                                 <th>Valor</th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody id="history-tbody">
-                            <tr><td colspan="5" style="text-align:center;">Carregando...</td></tr>
+                            <tr><td colspan="6" style="text-align:center;">Carregando...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -618,6 +619,43 @@
                 <p id="pin-error" style="color: var(--danger); font-size: 0.85rem; min-height: 18px; margin-bottom: 10px;"></p>
                 <a href="/" style="display: block; color: var(--text-muted); font-size: 0.85rem; text-decoration: none; margin-bottom: 12px;">← Ir para a página principal</a>
                 <button type="submit" class="btn btn-primary" id="btn-pin-login">Entrar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Transaction Modal -->
+    <div class="modal hidden" id="tx-modal">
+        <div class="modal-content glass-panel">
+            <span class="close-btn" id="close-tx-modal">&times;</span>
+            <h2>Editar Transação</h2>
+            <input type="hidden" id="tx-edit-id">
+            <form style="margin-top: 20px;" autocomplete="off">
+                <div class="input-group small">
+                    <select id="tx-edit-user" style="background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 10px; width: 100%; font-size: 0.95rem;">
+                        <option value="">Selecionar usuário...</option>
+                    </select>
+                    <label style="position:static; font-size:0.75rem; color:var(--text-muted); margin-bottom:4px; display:block;">Usuário</label>
+                </div>
+                <div class="input-group small">
+                    <select id="tx-edit-type" style="background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 10px; width: 100%; font-size: 0.95rem;">
+                        <option value="consumption">Consumo</option>
+                        <option value="recharge">Recarga</option>
+                    </select>
+                    <label style="position:static; font-size:0.75rem; color:var(--text-muted); margin-bottom:4px; display:block;">Tipo</label>
+                </div>
+                <div class="input-group small">
+                    <input type="number" id="tx-edit-amount" placeholder=" " min="0" step="0.01">
+                    <label for="tx-edit-amount">Valor (R$)</label>
+                </div>
+                <div class="input-group small">
+                    <input type="datetime-local" id="tx-edit-timestamp" placeholder=" " style="color-scheme: dark;">
+                    <label for="tx-edit-timestamp">Data / Hora</label>
+                </div>
+                <div id="tx-edit-msg" style="min-height:20px; font-size:0.85rem; text-align:center; margin-bottom:8px;"></div>
+                <div style="display:flex; gap:10px;">
+                    <button type="button" class="btn btn-primary" id="btn-save-tx" style="flex:1;">Salvar</button>
+                    <button type="button" class="btn" id="btn-delete-tx" style="flex:0 0 auto; background:#7f1d1d; border-color:#ef4444; color:#fca5a5; padding: 0 18px;">Excluir</button>
+                </div>
             </form>
         </div>
     </div>

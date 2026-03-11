@@ -397,6 +397,66 @@ app.post('/api/recharge', async (req, res) => {
     }
 });
 
+app.put('/api/admin/transactions/:id', requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const { user_id, type, amount, timestamp } = req.body;
+    if (!user_id || !type || amount === undefined || !timestamp) {
+        return res.status(400).json({ error: 'Campos obrigatórios: user_id, type, amount, timestamp' });
+    }
+    if (!['consumption', 'recharge'].includes(type)) {
+        return res.status(400).json({ error: 'Tipo inválido' });
+    }
+    const finalAmount = type === 'consumption' ? -Math.abs(parseFloat(amount)) : Math.abs(parseFloat(amount));
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const old = await client.query('SELECT user_id FROM transactions WHERE id = $1', [id]);
+        if (old.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Transação não encontrada' }); }
+        const oldUserId = old.rows[0].user_id;
+        await client.query(
+            'UPDATE transactions SET user_id=$1, type=$2, amount=$3, timestamp=$4 WHERE id=$5',
+            [user_id, type, finalAmount, timestamp, id]
+        );
+        const affectedUsers = [...new Set([parseInt(oldUserId), parseInt(user_id)])];
+        for (const uid of affectedUsers) {
+            await client.query(
+                'UPDATE users SET balance = COALESCE((SELECT SUM(amount) FROM transactions WHERE user_id=$1), 0) WHERE id=$1',
+                [uid]
+            );
+        }
+        await client.query('COMMIT');
+        res.json({ success: true });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+app.delete('/api/admin/transactions/:id', requireAdmin, async (req, res) => {
+    const { id } = req.params;
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const old = await client.query('SELECT user_id FROM transactions WHERE id=$1', [id]);
+        if (old.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Transação não encontrada' }); }
+        const userId = old.rows[0].user_id;
+        await client.query('DELETE FROM transactions WHERE id=$1', [id]);
+        await client.query(
+            'UPDATE users SET balance = COALESCE((SELECT SUM(amount) FROM transactions WHERE user_id=$1), 0) WHERE id=$1',
+            [userId]
+        );
+        await client.query('COMMIT');
+        res.json({ success: true });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
 app.get('/api/admin/stats/balance', requireAdmin, async (req, res) => {
     try {
         const stockResult = await pool.query(`
