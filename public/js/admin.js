@@ -191,6 +191,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let chartCount = null;
     let chartValue = null;
     let chartPrice = null;
+    let chartUserWeekly = null;
 
     // =====================
     //  INIT
@@ -515,6 +516,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${user.matricula}</td>
                 <td>R$ ${parseFloat(user.balance).toFixed(2).replace('.', ',')}</td>
                 <td>
+                    <button onclick="openUserSummary(${user.id})" style="padding: 4px 10px; font-size: 0.8rem; color: #a78bfa; cursor: pointer; background: transparent; border-radius: 6px; border: 1px solid #a78bfa; margin-right: 5px;">Ver</button>
                     <button onclick="editUser(${user.id}, '${user.name.replace(/'/g, "\\'")}', '${user.matricula}', ${user.balance})" style="padding: 4px 10px; font-size: 0.8rem; color: var(--secondary-color); cursor: pointer; background: transparent; border-radius: 6px; border: 1px solid var(--secondary-color); margin-right: 5px;">Editar</button>
                     <button onclick="deleteUser(${user.id})" style="padding: 4px 10px; font-size: 0.8rem; color: var(--danger); cursor: pointer; background: transparent; border-radius: 6px; border: 1px solid var(--danger);">Excluir</button>
                 </td>`;
@@ -647,6 +649,102 @@ document.addEventListener('DOMContentLoaded', () => {
             else alert('Erro ao excluir usuário');
         } catch {
             alert('Erro de conexão');
+        }
+    };
+
+    // =====================
+    //  USER SUMMARY PANEL
+    // =====================
+    const summaryOverlay = document.getElementById('user-summary-overlay');
+    const btnCloseSummary = document.getElementById('btn-close-summary');
+
+    function openSummaryPanel() {
+        summaryOverlay.classList.add('open');
+        document.body.style.overflow = 'hidden';
+    }
+    function closeSummaryPanel() {
+        summaryOverlay.classList.remove('open');
+        document.body.style.overflow = '';
+    }
+
+    if (btnCloseSummary) btnCloseSummary.addEventListener('click', closeSummaryPanel);
+    if (summaryOverlay) summaryOverlay.addEventListener('click', e => { if (e.target === summaryOverlay) closeSummaryPanel(); });
+
+    window.openUserSummary = async function (id) {
+        document.getElementById('usr-name').textContent = '—';
+        document.getElementById('usr-meta').textContent = '—';
+        document.getElementById('usr-avatar').textContent = '…';
+        document.getElementById('usr-balance').textContent = 'R$ —';
+        document.getElementById('usr-last-tx').textContent = '—';
+        document.getElementById('usr-total-cons').textContent = '—';
+        document.getElementById('usr-total-val').textContent = '—';
+        document.getElementById('usr-total-rec').textContent = '—';
+        document.getElementById('usr-total-rec-val').textContent = '—';
+        document.getElementById('usr-tx-list').innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Carregando...</p>';
+        openSummaryPanel();
+
+        try {
+            const res = await authFetch(`${API_URL}/admin/users/${id}/summary`);
+            if (!res.ok) { document.getElementById('usr-tx-list').innerHTML = '<p style="color:var(--danger)">Erro ao carregar dados.</p>'; return; }
+            const data = await res.json();
+            const { user, stats, weekly, recent_transactions } = data;
+
+            const initials = user.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+            document.getElementById('usr-avatar').textContent = initials;
+            document.getElementById('usr-name').textContent = user.name;
+            document.getElementById('usr-meta').textContent = `Matrícula: ${user.matricula}`;
+            document.getElementById('usr-balance').textContent = `R$ ${parseFloat(user.balance).toFixed(2).replace('.', ',')}`;
+
+            const lastTx = stats.last_transaction
+                ? new Date(stats.last_transaction).toLocaleDateString('pt-BR')
+                : 'Nenhuma';
+            document.getElementById('usr-last-tx').textContent = lastTx;
+
+            document.getElementById('usr-total-cons').textContent = stats.total_consumptions;
+            document.getElementById('usr-total-val').textContent = `R$ ${parseFloat(stats.total_consumed_value).toFixed(2).replace('.', ',')}`;
+            document.getElementById('usr-total-rec').textContent = stats.total_recharges;
+            document.getElementById('usr-total-rec-val').textContent = `R$ ${parseFloat(stats.total_recharged_value).toFixed(2).replace('.', ',')}`;
+
+            const gridColor = 'rgba(255,255,255,0.07)';
+            const tickColor = '#94a3b8';
+            const amber = '#f59e0b';
+            if (chartUserWeekly) chartUserWeekly.destroy();
+            chartUserWeekly = new Chart(document.getElementById('chart-user-weekly'), {
+                type: 'bar',
+                data: {
+                    labels: weekly.map(r => 'Sem ' + r.label),
+                    datasets: [{ data: weekly.map(r => parseInt(r.count)), backgroundColor: `${amber}99`, borderColor: amber, borderWidth: 2, borderRadius: 5 }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${ctx.parsed.y} doses` } } },
+                    scales: {
+                        x: { ticks: { color: tickColor, font: { size: 9 } }, grid: { color: gridColor } },
+                        y: { ticks: { color: tickColor, font: { size: 9 } }, grid: { color: gridColor }, beginAtZero: true }
+                    }
+                }
+            });
+
+            if (recent_transactions.length === 0) {
+                document.getElementById('usr-tx-list').innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Sem transações registradas.</p>';
+            } else {
+                document.getElementById('usr-tx-list').innerHTML = recent_transactions.map(tx => {
+                    const isConsumption = tx.type === 'consumption';
+                    const sign = isConsumption ? '−' : '+';
+                    const cls = isConsumption ? 'tx-type-consumption' : 'tx-type-recharge';
+                    const label = isConsumption ? 'Consumo' : 'Recarga';
+                    const date = new Date(tx.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+                    return `<div class="usr-tx-row">
+                        <div>
+                            <span class="${cls}">${label}</span>
+                            <div class="usr-tx-date">${date}</div>
+                        </div>
+                        <span class="${cls}" style="font-weight:600;">${sign} R$ ${Math.abs(parseFloat(tx.amount)).toFixed(2).replace('.', ',')}</span>
+                    </div>`;
+                }).join('');
+            }
+        } catch (err) {
+            document.getElementById('usr-tx-list').innerHTML = '<p style="color:var(--danger)">Erro de conexão.</p>';
         }
     };
 

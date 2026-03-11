@@ -177,6 +177,53 @@ app.post('/api/system/pix', requireAdmin, async (req, res) => {
     }
 });
 
+app.get('/api/admin/users/:id/summary', requireAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const userResult = await pool.query('SELECT * FROM users WHERE id = $1', [id]);
+        if (userResult.rows.length === 0) return res.status(404).json({ error: 'Usuário não encontrado.' });
+        const user = userResult.rows[0];
+
+        const statsResult = await pool.query(`
+            SELECT
+                COUNT(*) FILTER (WHERE type = 'consumption')                          AS total_consumptions,
+                COALESCE(ABS(SUM(amount) FILTER (WHERE type = 'consumption')), 0)     AS total_consumed_value,
+                COUNT(*) FILTER (WHERE type = 'recharge')                             AS total_recharges,
+                COALESCE(SUM(amount) FILTER (WHERE type = 'recharge'), 0)             AS total_recharged_value,
+                MIN(timestamp)                                                         AS first_transaction,
+                MAX(timestamp)                                                         AS last_transaction
+            FROM transactions WHERE user_id = $1
+        `, [id]);
+
+        const weeklyResult = await pool.query(`
+            SELECT
+                DATE_TRUNC('week', timestamp AT TIME ZONE 'America/Sao_Paulo') AS week_start,
+                TO_CHAR(DATE_TRUNC('week', timestamp AT TIME ZONE 'America/Sao_Paulo'), 'DD/MM') AS label,
+                COUNT(*) AS count
+            FROM transactions
+            WHERE user_id = $1 AND type = 'consumption'
+              AND timestamp >= NOW() - INTERVAL '8 weeks'
+            GROUP BY DATE_TRUNC('week', timestamp AT TIME ZONE 'America/Sao_Paulo')
+            ORDER BY week_start ASC
+        `, [id]);
+
+        const recentResult = await pool.query(`
+            SELECT id, type, amount, timestamp
+            FROM transactions WHERE user_id = $1
+            ORDER BY timestamp DESC LIMIT 20
+        `, [id]);
+
+        res.json({
+            user,
+            stats: statsResult.rows[0],
+            weekly: weeklyResult.rows,
+            recent_transactions: recentResult.rows
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // =====================
 //  USERS — PUBLIC
 // =====================
