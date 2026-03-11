@@ -184,7 +184,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const closeApproveModal = document.getElementById('close-approve-modal');
     const approveReceiptId = document.getElementById('approve-receipt-id');
     const approveUserName = document.getElementById('approve-user-name');
-    const approveDeclaredAmount = document.getElementById('approve-declared-amount');
     const approveViewFile = document.getElementById('approve-view-file');
     const approveAmountInput = document.getElementById('approve-amount-input');
     const approveMsg = document.getElementById('approve-msg');
@@ -379,10 +378,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!tbody) return;
         try {
             const res = await authFetch(`${API_URL}/admin/stock-history`);
-            if (!res.ok) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">Sem dados</td></tr>'; return; }
+            if (!res.ok) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">Sem dados</td></tr>'; return; }
             const rows = await res.json();
             if (rows.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">Nenhuma remessa registrada ainda.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">Nenhuma remessa registrada ainda.</td></tr>';
                 return;
             }
             tbody.innerHTML = rows.map(r => {
@@ -390,18 +389,89 @@ document.addEventListener('DOMContentLoaded', () => {
                 const costPer = parseFloat(r.cost_per_kg).toFixed(2).replace('.', ',');
                 const cost = parseFloat(r.added_cost).toFixed(2).replace('.', ',');
                 const price = parseFloat(r.price_per_dose || 0).toFixed(3).replace('.', ',');
+                const ts = new Date(r.timestamp).toISOString().slice(0, 16);
                 return `<tr>
                     <td>${date}</td>
                     <td>${parseFloat(r.added_grams).toFixed(0)} g</td>
                     <td>R$ ${cost}</td>
                     <td>R$ ${costPer}</td>
                     <td>R$ ${price}</td>
+                    <td>
+                        <button class="btn-edit-remessa" data-id="${r.id}" data-grams="${r.added_grams}" data-cost="${r.added_cost}" data-ts="${ts}"
+                            style="background:none;border:1px solid rgba(255,255,255,0.2);color:var(--text-muted);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:0.78rem;margin-right:4px;">✏️</button>
+                        <button class="btn-del-remessa" data-id="${r.id}"
+                            style="background:none;border:1px solid #ef4444;color:#f87171;border-radius:5px;padding:2px 8px;cursor:pointer;font-size:0.78rem;">🗑</button>
+                    </td>
                 </tr>`;
             }).join('');
+            tbody.querySelectorAll('.btn-edit-remessa').forEach(btn => {
+                btn.addEventListener('click', () => openEditRemessaModal(btn.dataset.id, btn.dataset.grams, btn.dataset.cost, btn.dataset.ts));
+            });
+            tbody.querySelectorAll('.btn-del-remessa').forEach(btn => {
+                btn.addEventListener('click', () => deleteRemessa(btn.dataset.id));
+            });
         } catch (err) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--danger)">Erro ao carregar histórico</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--danger)">Erro ao carregar histórico</td></tr>';
         }
     }
+
+    function openEditRemessaModal(id, grams, cost, ts) {
+        document.getElementById('remessa-edit-id').value = id;
+        document.getElementById('remessa-edit-grams').value = parseFloat(grams).toFixed(0);
+        document.getElementById('remessa-edit-cost').value = parseFloat(cost).toFixed(2);
+        document.getElementById('remessa-edit-ts').value = ts;
+        document.getElementById('remessa-edit-msg').textContent = '';
+        document.getElementById('remessa-modal').classList.remove('hidden');
+    }
+
+    async function deleteRemessa(id) {
+        if (!confirm('Excluir esta remessa? O estoque será recalculado.')) return;
+        try {
+            const res = await authFetch(`${API_URL}/admin/stock-history/${id}`, { method: 'DELETE', headers: authHeaders() });
+            const data = await res.json();
+            if (res.ok) {
+                await loadStockHistory();
+                await loadState();
+                await loadPriceHistory();
+                const sm = document.getElementById('stock-msg');
+                if (sm) { sm.style.color = 'var(--success)'; sm.textContent = `Remessa excluída. Estoque: ${data.newStock.toFixed(0)} g`; }
+            } else {
+                alert(data.error || 'Erro ao excluir remessa.');
+            }
+        } catch { alert('Erro de conexão.'); }
+    }
+
+    document.getElementById('btn-save-remessa').addEventListener('click', async () => {
+        const id = document.getElementById('remessa-edit-id').value;
+        const grams = document.getElementById('remessa-edit-grams').value;
+        const cost = document.getElementById('remessa-edit-cost').value;
+        const ts = document.getElementById('remessa-edit-ts').value;
+        const msgEl = document.getElementById('remessa-edit-msg');
+        msgEl.textContent = '';
+        try {
+            const res = await authFetch(`${API_URL}/admin/stock-history/${id}`, {
+                method: 'PUT',
+                headers: authHeaders(),
+                body: JSON.stringify({ added_grams: grams, added_cost: cost, timestamp: ts || undefined })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                document.getElementById('remessa-modal').classList.add('hidden');
+                await loadStockHistory();
+                await loadState();
+                await loadPriceHistory();
+                const sm = document.getElementById('stock-msg');
+                if (sm) { sm.style.color = 'var(--success)'; sm.textContent = `Remessa atualizada. Estoque: ${data.newStock.toFixed(0)} g`; }
+            } else {
+                msgEl.style.color = '#f87171';
+                msgEl.textContent = data.error || 'Erro ao salvar.';
+            }
+        } catch { msgEl.style.color = '#f87171'; msgEl.textContent = 'Erro de conexão.'; }
+    });
+
+    document.getElementById('close-remessa-modal').addEventListener('click', () => {
+        document.getElementById('remessa-modal').classList.add('hidden');
+    });
 
     async function loadPriceHistory() {
         const canvas = document.getElementById('chart-price-history');
@@ -562,7 +632,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const approvedAmt = r.amount_approved ? `<br><span style="font-size:0.78rem; color:#4ade80;">Aprovado: R$ ${parseFloat(r.amount_approved).toFixed(2).replace('.', ',')}</span>` : '';
             const noteCell = r.notes ? `<br><span style="font-size:0.78rem; color:#f87171;">${r.notes}</span>` : '';
             const reviewBtn = r.status === 'pending'
-                ? `<button class="btn-review-receipt" data-id="${r.id}" data-user="${r.name}" data-amt="${r.amount_declared}" style="background:none; border:1px solid #f59e0b; color:#f59e0b; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:0.8rem;">Revisar</button>`
+                ? `<button class="btn-review-receipt" data-id="${r.id}" data-user="${r.name}" style="background:none; border:1px solid #f59e0b; color:#f59e0b; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:0.8rem;">Revisar</button>`
                 : '';
             return `<tr>
                 <td>${date}</td>
@@ -573,7 +643,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </tr>`;
         }).join('');
         receiptsTbody.querySelectorAll('.btn-review-receipt').forEach(btn => {
-            btn.addEventListener('click', () => openApproveModal(btn.dataset.id, btn.dataset.user, btn.dataset.amt));
+            btn.addEventListener('click', () => openApproveModal(btn.dataset.id, btn.dataset.user));
         });
     }
 
@@ -581,11 +651,10 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.addEventListener('click', () => renderReceipts(btn.dataset.filter));
     });
 
-    function openApproveModal(id, userName, declared) {
+    function openApproveModal(id, userName) {
         approveReceiptId.value = id;
         approveUserName.textContent = userName;
-        approveDeclaredAmount.textContent = `R$ ${parseFloat(declared).toFixed(2).replace('.', ',')}`;
-        approveAmountInput.value = parseFloat(declared).toFixed(2);
+        approveAmountInput.value = '';
         approveMsg.textContent = '';
         approveViewFile.href = `/api/admin/receipts/${id}/file?token=${getToken()}`;
         approveReceiptModal.classList.remove('hidden');

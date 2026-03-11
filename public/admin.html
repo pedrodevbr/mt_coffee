@@ -495,6 +495,7 @@
                                     <th>Custo (R$)</th>
                                     <th>R$/kg</th>
                                     <th>Preço/Dose</th>
+                                    <th></th>
                                 </tr>
                             </thead>
                             <tbody id="stock-history-body">
@@ -716,7 +717,6 @@
             <input type="hidden" id="approve-receipt-id">
             <div style="margin: 18px 0 10px; background:rgba(255,255,255,0.05); border-radius:10px; padding:14px; font-size:0.9rem;">
                 <div style="margin-bottom:6px;"><span style="color:var(--text-muted);">Usuário: </span><strong id="approve-user-name">--</strong></div>
-                <div style="margin-bottom:6px;"><span style="color:var(--text-muted);">Valor declarado: </span><strong id="approve-declared-amount" style="color:#f59e0b;">R$ --</strong></div>
                 <div><span style="color:var(--text-muted);">Arquivo: </span><a id="approve-view-file" href="#" target="_blank" style="color:#60a5fa; font-size:0.85rem;">Ver comprovante ↗</a></div>
             </div>
             <div class="input-group small">
@@ -764,6 +764,31 @@
                     <button type="button" class="btn btn-primary" id="btn-save-tx" style="flex:1;">Salvar</button>
                     <button type="button" class="btn" id="btn-delete-tx" style="flex:0 0 auto; background:#7f1d1d; border-color:#ef4444; color:#fca5a5; padding: 0 18px;">Excluir</button>
                 </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Remessa Modal -->
+    <div class="modal hidden" id="remessa-modal">
+        <div class="modal-content glass-panel">
+            <span class="close-btn" id="close-remessa-modal">&times;</span>
+            <h2>Editar Remessa</h2>
+            <input type="hidden" id="remessa-edit-id">
+            <form style="margin-top: 20px;" autocomplete="off">
+                <div class="input-group small">
+                    <input type="number" id="remessa-edit-grams" placeholder=" " min="1" step="1">
+                    <label for="remessa-edit-grams">Quantidade (g)</label>
+                </div>
+                <div class="input-group small">
+                    <input type="number" id="remessa-edit-cost" placeholder=" " min="0" step="0.01">
+                    <label for="remessa-edit-cost">Custo Total (R$)</label>
+                </div>
+                <div class="input-group small">
+                    <input type="datetime-local" id="remessa-edit-ts" placeholder=" " style="color-scheme: dark;">
+                    <label for="remessa-edit-ts">Data / Hora</label>
+                </div>
+                <div id="remessa-edit-msg" style="min-height:20px; font-size:0.85rem; text-align:center; margin-bottom:8px; color:#f87171;"></div>
+                <button type="button" class="btn btn-primary" id="btn-save-remessa" style="width:100%;">Salvar</button>
             </form>
         </div>
     </div>

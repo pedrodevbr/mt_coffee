@@ -176,6 +176,66 @@ app.get('/api/admin/stock-history', requireAdmin, async (req, res) => {
     }
 });
 
+async function recalculateStockState(client) {
+    const doseResult = await client.query("SELECT value FROM settings WHERE key = 'dose_grams'");
+    const doseGrams = doseResult.rows.length ? parseFloat(doseResult.rows[0].value) : 10;
+    const stockSum = await client.query(
+        'SELECT COALESCE(SUM(added_grams),0) AS tg, COALESCE(SUM(added_cost),0) AS tc FROM stock_history'
+    );
+    const totalGrams = parseFloat(stockSum.rows[0].tg);
+    const totalCost = parseFloat(stockSum.rows[0].tc);
+    const consResult = await client.query("SELECT COUNT(*) AS cnt FROM transactions WHERE type='consumption'");
+    const consumedGrams = parseInt(consResult.rows[0].cnt) * doseGrams;
+    const currentStock = Math.max(0, totalGrams - consumedGrams);
+    await client.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [currentStock, totalCost]);
+    return { currentStock, totalCost };
+}
+
+app.put('/api/admin/stock-history/:id', requireAdmin, async (req, res) => {
+    const { added_grams, added_cost, timestamp } = req.body;
+    const grams = parseFloat(added_grams);
+    const cost = parseFloat(added_cost || 0);
+    if (isNaN(grams) || grams <= 0) return res.status(400).json({ error: 'Quantidade de gramas inválida.' });
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const exists = await client.query('SELECT id FROM stock_history WHERE id=$1', [req.params.id]);
+        if (exists.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Remessa não encontrada.' }); }
+        const tsClause = timestamp ? `, timestamp = $3` : '';
+        const params = timestamp ? [grams, cost, timestamp, req.params.id] : [grams, cost, req.params.id];
+        await client.query(
+            `UPDATE stock_history SET added_grams=$1, added_cost=$2${tsClause} WHERE id=$${params.length}`,
+            params
+        );
+        const { currentStock } = await recalculateStockState(client);
+        await client.query('COMMIT');
+        res.json({ success: true, newStock: currentStock });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+app.delete('/api/admin/stock-history/:id', requireAdmin, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const exists = await client.query('SELECT id FROM stock_history WHERE id=$1', [req.params.id]);
+        if (exists.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Remessa não encontrada.' }); }
+        await client.query('DELETE FROM stock_history WHERE id=$1', [req.params.id]);
+        const { currentStock } = await recalculateStockState(client);
+        await client.query('COMMIT');
+        res.json({ success: true, newStock: currentStock });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
 app.post('/api/system/qr', requireAdmin, upload.single('qr_image'), async (req, res) => {
     try {
         if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -519,6 +579,28 @@ app.get('/api/receipts/:matricula', async (req, res) => {
             [userResult.rows[0].id]
         );
         res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/receipts/:matricula/:id/file', async (req, res) => {
+    try {
+        const { matricula, id } = req.params;
+        const result = await pool.query(
+            `SELECT pr.file_path, pr.file_name, pr.file_type
+             FROM payment_receipts pr
+             JOIN users u ON pr.user_id = u.id
+             WHERE pr.id = $1 AND u.matricula = $2`,
+            [id, matricula]
+        );
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Arquivo não encontrado.' });
+        const { file_path, file_name, file_type } = result.rows[0];
+        const fullPath = path.join(receiptsDir, file_path);
+        if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Arquivo não encontrado no servidor.' });
+        res.setHeader('Content-Type', file_type);
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file_name)}"`);
+        fs.createReadStream(fullPath).pipe(res);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

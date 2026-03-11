@@ -365,15 +365,19 @@ document.addEventListener('DOMContentLoaded', () => {
             userReceiptsList.innerHTML = receipts.map(r => {
                 const [label, color] = statusMap[r.status] || ['--', '#fff'];
                 const date = new Date(r.created_at).toLocaleDateString('pt-BR');
-                const amtDeclared = parseFloat(r.amount_declared).toFixed(2).replace('.', ',');
-                const amtApproved = r.amount_approved ? ` → aprovado R$ ${parseFloat(r.amount_approved).toFixed(2).replace('.', ',')}` : '';
+                const amtApproved = r.amount_approved ? `<span style="color:var(--success); font-size:0.78rem;"> · Creditado R$ ${parseFloat(r.amount_approved).toFixed(2).replace('.', ',')}</span>` : '';
                 const note = r.notes ? `<span style="color:var(--danger); font-size:0.78rem;"> · ${r.notes}</span>` : '';
-                return `<div style="display:flex; justify-content:space-between; align-items:center; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.07);">
-                    <div>
-                        <span style="font-weight:500;">R$ ${amtDeclared}${amtApproved}</span>
-                        <span style="color:var(--text-muted); font-size:0.78rem; margin-left:6px;">${date}</span>${note}
+                const viewLink = `<a href="/api/receipts/${currentUser.matricula}/${r.id}/file" target="_blank" style="color:#60a5fa; font-size:0.78rem; margin-left:8px; white-space:nowrap;">Ver ↗</a>`;
+                return `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.07);">
+                    <div style="flex:1; min-width:0;">
+                        <div style="display:flex; align-items:center; gap:4px; flex-wrap:wrap;">
+                            <span style="color:var(--text-muted); font-size:0.78rem;">${date}</span>
+                            ${viewLink}
+                            ${amtApproved}${note}
+                        </div>
+                        <div style="font-size:0.78rem; color:var(--text-muted); margin-top:2px;">${r.file_name || ''}</div>
                     </div>
-                    <span style="color:${color}; font-size:0.82rem; white-space:nowrap; margin-left:8px;">${label}</span>
+                    <span style="color:${color}; font-size:0.82rem; white-space:nowrap; margin-left:10px;">${label}</span>
                 </div>`;
             }).join('');
         } catch {}
