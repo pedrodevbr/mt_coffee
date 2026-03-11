@@ -258,17 +258,6 @@ document.addEventListener('DOMContentLoaded', () => {
     closeUserModal.addEventListener('click', () => userModal.classList.add('hidden'));
     btnSaveUser.addEventListener('click', handleSaveUser);
 
-    const btnToggleHistory = document.getElementById('btn-toggle-history');
-    const historyCollapsible = document.getElementById('history-collapsible');
-    const historyToggleIcon = document.getElementById('history-toggle-icon');
-    if (btnToggleHistory) {
-        btnToggleHistory.addEventListener('click', () => {
-            const isOpen = historyCollapsible.style.display !== 'none';
-            historyCollapsible.style.display = isOpen ? 'none' : 'block';
-            historyToggleIcon.style.transform = isOpen ? '' : 'rotate(180deg)';
-            btnToggleHistory.setAttribute('aria-expanded', String(!isOpen));
-        });
-    }
 
     // =====================
     //  ANALYTICS / STATS
@@ -570,7 +559,6 @@ document.addEventListener('DOMContentLoaded', () => {
         receiptsTbody.innerHTML = filtered.map(r => {
             const [statusLabel, statusColor] = statusStyles[r.status] || ['--', '#fff'];
             const date = new Date(r.created_at).toLocaleDateString('pt-BR');
-            const amt = `R$ ${parseFloat(r.amount_declared).toFixed(2).replace('.', ',')}`;
             const approvedAmt = r.amount_approved ? `<br><span style="font-size:0.78rem; color:#4ade80;">Aprovado: R$ ${parseFloat(r.amount_approved).toFixed(2).replace('.', ',')}</span>` : '';
             const noteCell = r.notes ? `<br><span style="font-size:0.78rem; color:#f87171;">${r.notes}</span>` : '';
             const reviewBtn = r.status === 'pending'
@@ -580,8 +568,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${date}</td>
                 <td>${r.name}</td>
                 <td>${r.matricula}</td>
-                <td>${amt}${approvedAmt}${noteCell}</td>
-                <td style="color:${statusColor}; font-weight:600;">${statusLabel}</td>
+                <td style="color:${statusColor}; font-weight:600;">${statusLabel}${approvedAmt}${noteCell}</td>
                 <td>${reviewBtn}</td>
             </tr>`;
         }).join('');

@@ -259,6 +259,36 @@
         .usr-tx-date { color: var(--text-muted); font-size: 0.78rem; }
         .tx-type-consumption { color: #f87171; }
         .tx-type-recharge { color: #4ade80; }
+
+        /* ---- Tabs ---- */
+        .tab-nav {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 24px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 14px;
+            padding: 5px;
+            flex-wrap: wrap;
+        }
+        .tab-btn {
+            flex: 1;
+            min-width: 90px;
+            background: none;
+            border: none;
+            padding: 9px 12px;
+            border-radius: 10px;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: background 0.18s, color 0.18s;
+            white-space: nowrap;
+        }
+        .tab-btn:hover { background: rgba(255,255,255,0.07); color: var(--text-primary); }
+        .tab-btn.active { background: var(--primary-color); color: #000; font-weight: 600; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
     </style>
 </head>
 
@@ -279,260 +309,282 @@
             </div>
         </header>
 
-        <div class="admin-dashboard">
+        <!-- ===== TAB NAV ===== -->
+        <nav class="tab-nav">
+            <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+            <button class="tab-btn" data-tab="financeiro">Financeiro</button>
+            <button class="tab-btn tab-btn-receipts" data-tab="comprovantes">
+                Comprovantes
+                <span id="receipts-pending-badge" style="background:#f59e0b; color:#000; border-radius:10px; padding:1px 8px; font-size:0.72rem; font-weight:700; margin-left:4px; display:none;">0</span>
+            </button>
+            <button class="tab-btn" data-tab="estoque">Estoque</button>
+            <button class="tab-btn" data-tab="usuarios">Usuários</button>
+            <button class="tab-btn" data-tab="config">Configurações</button>
+        </nav>
 
-            <!-- ===== COMPROVANTES PENDENTES ===== -->
-            <div class="glass-panel admin-card span-2" id="receipts-card">
-                <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
-                    <p class="section-title" style="margin:0;">Comprovantes de Pagamento</p>
-                    <span id="receipts-pending-badge" style="background:#f59e0b; color:#000; border-radius:12px; padding:2px 10px; font-size:0.78rem; font-weight:700; display:none;">0 pendentes</span>
+        <!-- ===== TAB: DASHBOARD ===== -->
+        <div class="tab-panel active" id="tab-dashboard">
+            <div class="admin-dashboard">
+                <div class="glass-panel admin-card span-2">
+                    <p class="section-title">Visão Geral</p>
+                    <p class="section-sub">Dados de consumo atualizados em tempo real</p>
+                    <hr class="divider">
+                    <div class="kpi-grid">
+                        <div class="kpi-card">
+                            <div class="kpi-label">Média Diária</div>
+                            <div class="kpi-value" id="kpi-avg-daily">--</div>
+                            <div class="kpi-sub">doses / dia útil</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Este Mês</div>
+                            <div class="kpi-value" id="kpi-this-month">--</div>
+                            <div class="kpi-sub">consumos</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Total Histórico</div>
+                            <div class="kpi-value" id="kpi-total">--</div>
+                            <div class="kpi-sub">consumos registrados</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Dias com Consumo</div>
+                            <div class="kpi-value" id="kpi-days">--</div>
+                            <div class="kpi-sub">dias úteis</div>
+                        </div>
+                    </div>
                 </div>
-                <p class="section-sub">Comprovantes enviados pelos usuários aguardando conferência e aprovação</p>
-                <hr class="divider">
-                <div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
-                    <button class="btn btn-outline" id="btn-filter-receipts-all" style="padding:4px 14px; font-size:0.8rem;" data-filter="all">Todos</button>
-                    <button class="btn btn-outline" id="btn-filter-receipts-pending" style="padding:4px 14px; font-size:0.8rem; border-color:#f59e0b; color:#f59e0b;" data-filter="pending">Pendentes</button>
-                    <button class="btn btn-outline" id="btn-filter-receipts-approved" style="padding:4px 14px; font-size:0.8rem; border-color:#4ade80; color:#4ade80;" data-filter="approved">Aprovados</button>
-                    <button class="btn btn-outline" id="btn-filter-receipts-rejected" style="padding:4px 14px; font-size:0.8rem; border-color:#f87171; color:#f87171;" data-filter="rejected">Rejeitados</button>
+
+                <div class="glass-panel admin-card">
+                    <p class="section-title">Consumos por Semana</p>
+                    <p class="section-sub">Número de doses — últimas 12 semanas</p>
+                    <div class="chart-wrap">
+                        <canvas id="chart-weekly-count"></canvas>
+                    </div>
                 </div>
-                <div style="overflow-x:auto;">
-                    <table class="data-table" id="receipts-table">
+
+                <div class="glass-panel admin-card">
+                    <p class="section-title">Valor Consumido por Semana</p>
+                    <p class="section-sub">Total gasto (R$) — últimas 12 semanas</p>
+                    <div class="chart-wrap">
+                        <canvas id="chart-weekly-value"></canvas>
+                    </div>
+                </div>
+
+                <div class="glass-panel admin-card span-2">
+                    <p class="section-title">Maiores Consumidores</p>
+                    <p class="section-sub">Últimos 30 dias</p>
+                    <hr class="divider">
+                    <div id="top-users-list">
+                        <p style="color: var(--text-muted); font-size: 0.85rem;">Carregando...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: FINANCEIRO ===== -->
+        <div class="tab-panel" id="tab-financeiro">
+            <div class="admin-dashboard">
+                <div class="glass-panel admin-card span-2" id="balance-card">
+                    <p class="section-title">Remessas vs Cobrado dos Usuários</p>
+                    <p class="section-sub">Custo total do café comprado × valor efetivamente recarregado pelos usuários</p>
+                    <hr class="divider">
+                    <div class="kpi-grid" style="margin-bottom: 16px;">
+                        <div class="kpi-card">
+                            <div class="kpi-label">Custo das Remessas</div>
+                            <div class="kpi-value" id="bal-stock-cost" style="color:#f87171;">R$ --</div>
+                            <div class="kpi-sub" id="bal-remessas-count">-- remessas</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Arrecadado (recargas)</div>
+                            <div class="kpi-value" id="bal-collected" style="color:#4ade80;">R$ --</div>
+                            <div class="kpi-sub" id="bal-consumptions-count">-- recargas</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Balanço</div>
+                            <div class="kpi-value" id="bal-balance">R$ --</div>
+                            <div class="kpi-sub" id="bal-balance-label">--</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Valor Consumido</div>
+                            <div class="kpi-value" id="bal-recharged" style="color:#60a5fa;">R$ --</div>
+                            <div class="kpi-sub">pelos usuários</div>
+                        </div>
+                    </div>
+                    <div id="bal-bar-wrap" style="margin-bottom: 16px; display:none;">
+                        <div style="display:flex; justify-content:space-between; font-size:0.78rem; color:var(--text-muted); margin-bottom: 6px;">
+                            <span>Cobertura dos custos</span>
+                            <span id="bal-coverage-pct">--%</span>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.08); border-radius:6px; height:10px; overflow:hidden;">
+                            <div id="bal-coverage-bar" style="height:100%; border-radius:6px; transition: width 0.8s ease; width:0%;"></div>
+                        </div>
+                    </div>
+                    <div class="chart-wrap" style="height:200px;">
+                        <canvas id="chart-balance-weekly"></canvas>
+                    </div>
+                    <p style="font-size:0.75rem; color:var(--text-muted); margin-top:8px; text-align:center;">
+                        * Custo das remessas registrado a partir da implantação do histórico de estoque
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: COMPROVANTES ===== -->
+        <div class="tab-panel" id="tab-comprovantes">
+            <div class="admin-dashboard">
+                <div class="glass-panel admin-card span-2" id="receipts-card">
+                    <p class="section-title">Comprovantes de Pagamento</p>
+                    <p class="section-sub">Comprovantes enviados pelos usuários aguardando conferência e aprovação</p>
+                    <hr class="divider">
+                    <div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
+                        <button class="btn btn-outline" id="btn-filter-receipts-all" style="padding:4px 14px; font-size:0.8rem;" data-filter="all">Todos</button>
+                        <button class="btn btn-outline" id="btn-filter-receipts-pending" style="padding:4px 14px; font-size:0.8rem; border-color:#f59e0b; color:#f59e0b;" data-filter="pending">Pendentes</button>
+                        <button class="btn btn-outline" id="btn-filter-receipts-approved" style="padding:4px 14px; font-size:0.8rem; border-color:#4ade80; color:#4ade80;" data-filter="approved">Aprovados</button>
+                        <button class="btn btn-outline" id="btn-filter-receipts-rejected" style="padding:4px 14px; font-size:0.8rem; border-color:#f87171; color:#f87171;" data-filter="rejected">Rejeitados</button>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table class="data-table" id="receipts-table">
+                            <thead>
+                                <tr>
+                                    <th>Data</th>
+                                    <th>Usuário</th>
+                                    <th>Matrícula</th>
+                                    <th>Status</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="receipts-tbody">
+                                <tr><td colspan="5" style="text-align:center;">Carregando...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: ESTOQUE ===== -->
+        <div class="tab-panel" id="tab-estoque">
+            <div class="admin-dashboard">
+                <div class="glass-panel admin-card">
+                    <h3>Visão de Estoque</h3>
+                    <div class="stock-display" id="admin-current-stock">-- g</div>
+                    <p>Preço por Dose (10g): <strong id="admin-dose-price">R$ --</strong></p>
+                    <hr class="divider">
+                    <h4 style="margin-bottom: 12px;">Adicionar Remessa</h4>
+                    <div class="input-group small">
+                        <input type="number" id="add-grams" placeholder=" ">
+                        <label for="add-grams">Quantidade em Gramas</label>
+                    </div>
+                    <div class="input-group small">
+                        <input type="number" id="add-cost" placeholder=" " step="0.01">
+                        <label for="add-cost">Custo Total (R$)</label>
+                    </div>
+                    <button class="btn btn-primary" id="btn-add-stock" style="margin-top: 10px;">Adicionar ao Estoque</button>
+                    <p id="stock-msg" class="action-msg"></p>
+                </div>
+
+                <div class="glass-panel admin-card">
+                    <p class="section-title">Histórico de Remessas</p>
+                    <p class="section-sub">Últimas 30 entradas de estoque registradas</p>
+                    <hr class="divider">
+                    <div id="stock-history-wrap" style="overflow-x: auto;">
+                        <table class="data-table" id="stock-history-table">
+                            <thead>
+                                <tr>
+                                    <th>Data</th>
+                                    <th>Gramas</th>
+                                    <th>Custo (R$)</th>
+                                    <th>R$/kg</th>
+                                    <th>Preço/Dose</th>
+                                </tr>
+                            </thead>
+                            <tbody id="stock-history-body">
+                                <tr><td colspan="5" style="text-align:center; color: var(--text-muted);">Carregando...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="glass-panel admin-card span-2">
+                    <p class="section-title">Histórico de Preço da Dose</p>
+                    <p class="section-sub">Evolução do preço por dose (10g) a cada remessa</p>
+                    <div class="chart-wrap">
+                        <canvas id="chart-price-history"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: USUÁRIOS ===== -->
+        <div class="tab-panel" id="tab-usuarios">
+            <div class="admin-dashboard">
+                <div class="glass-panel admin-card table-container span-2">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3>Gestão de Usuários</h3>
+                        <button class="btn btn-outline" id="btn-new-user" style="padding: 5px 15px; font-size: 0.9em; width: auto;">+ Novo Usuário</button>
+                    </div>
+                    <table id="users-table">
                         <thead>
                             <tr>
-                                <th>Data</th>
-                                <th>Usuário</th>
+                                <th>Nome</th>
                                 <th>Matrícula</th>
-                                <th>Valor Declarado</th>
-                                <th>Status</th>
+                                <th>Saldo</th>
                                 <th>Ações</th>
                             </tr>
                         </thead>
-                        <tbody id="receipts-tbody">
-                            <tr><td colspan="6" style="text-align:center;">Carregando...</td></tr>
+                        <tbody id="users-tbody">
+                            <tr><td colspan="4" style="text-align:center;">Carregando...</td></tr>
                         </tbody>
                     </table>
                 </div>
-            </div>
 
-            <!-- ===== ANALYTICS SECTION ===== -->
-            <!-- KPI Row -->
-            <div class="glass-panel admin-card span-2">
-                <p class="section-title">Visão Geral</p>
-                <p class="section-sub">Dados de consumo atualizados em tempo real</p>
-                <hr class="divider">
-                <div class="kpi-grid">
-                    <div class="kpi-card">
-                        <div class="kpi-label">Média Diária</div>
-                        <div class="kpi-value" id="kpi-avg-daily">--</div>
-                        <div class="kpi-sub">doses / dia útil</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-label">Este Mês</div>
-                        <div class="kpi-value" id="kpi-this-month">--</div>
-                        <div class="kpi-sub">consumos</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-label">Total Histórico</div>
-                        <div class="kpi-value" id="kpi-total">--</div>
-                        <div class="kpi-sub">consumos registrados</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-label">Dias com Consumo</div>
-                        <div class="kpi-value" id="kpi-days">--</div>
-                        <div class="kpi-sub">dias úteis</div>
+                <div class="glass-panel admin-card table-container span-2">
+                    <h3 style="margin-bottom:15px;">Histórico Global de Transações</h3>
+                    <div style="overflow-x: auto;">
+                        <table id="history-table">
+                            <thead>
+                                <tr>
+                                    <th>Data/Hora</th>
+                                    <th>Usuário</th>
+                                    <th>Matrícula</th>
+                                    <th>Tipo</th>
+                                    <th>Valor</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-tbody">
+                                <tr><td colspan="6" style="text-align:center;">Carregando...</td></tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
+        </div>
 
-            <!-- Remessas vs Cobrado Card -->
-            <div class="glass-panel admin-card span-2" id="balance-card">
-                <p class="section-title">Remessas vs Cobrado dos Usuários</p>
-                <p class="section-sub">Custo total do café comprado × valor efetivamente recarregado pelos usuários</p>
-                <hr class="divider">
-                <div class="kpi-grid" style="margin-bottom: 16px;">
-                    <div class="kpi-card">
-                        <div class="kpi-label">Custo das Remessas</div>
-                        <div class="kpi-value" id="bal-stock-cost" style="color:#f87171;">R$ --</div>
-                        <div class="kpi-sub" id="bal-remessas-count">-- remessas</div>
+        <!-- ===== TAB: CONFIGURAÇÕES ===== -->
+        <div class="tab-panel" id="tab-config">
+            <div class="admin-dashboard">
+                <div class="glass-panel admin-card">
+                    <h3>Pagamento PIX</h3>
+                    <p style="margin-bottom: 10px; color: var(--text-muted); font-size: 0.9rem;">Configure os dados para recebimento das recargas.</p>
+                    <div class="input-group small">
+                        <input type="text" id="pix-key-input" placeholder=" ">
+                        <label for="pix-key-input">Chave PIX (E-mail, CPF, Celular...)</label>
                     </div>
-                    <div class="kpi-card">
-                        <div class="kpi-label">Arrecadado (recargas)</div>
-                        <div class="kpi-value" id="bal-collected" style="color:#4ade80;">R$ --</div>
-                        <div class="kpi-sub" id="bal-consumptions-count">-- recargas</div>
+                    <button class="btn btn-primary" id="btn-save-pix" style="margin-bottom: 20px; width: 100%;">Salvar Chave PIX</button>
+                    <div class="qr-container" style="margin: 0 auto 15px auto;">
+                        <img id="admin-qr-preview" src="" alt="QR Atual" style="max-width: 150px; border-radius: 8px;">
                     </div>
-                    <div class="kpi-card">
-                        <div class="kpi-label">Balanço</div>
-                        <div class="kpi-value" id="bal-balance">R$ --</div>
-                        <div class="kpi-sub" id="bal-balance-label">--</div>
+                    <div class="input-group small">
+                        <input type="file" id="qr-file" accept="image/*" style="padding: 10px 0;">
                     </div>
-                    <div class="kpi-card">
-                        <div class="kpi-label">Valor Consumido</div>
-                        <div class="kpi-value" id="bal-recharged" style="color:#60a5fa;">R$ --</div>
-                        <div class="kpi-sub">pelos usuários</div>
-                    </div>
+                    <button class="btn btn-secondary" id="btn-upload-qr" style="margin-top: 10px;">Salvar QR Code</button>
+                    <p id="qr-msg" class="action-msg"></p>
                 </div>
-                <div id="bal-bar-wrap" style="margin-bottom: 16px; display:none;">
-                    <div style="display:flex; justify-content:space-between; font-size:0.78rem; color:var(--text-muted); margin-bottom: 6px;">
-                        <span>Cobertura dos custos</span>
-                        <span id="bal-coverage-pct">--%</span>
-                    </div>
-                    <div style="background:rgba(255,255,255,0.08); border-radius:6px; height:10px; overflow:hidden;">
-                        <div id="bal-coverage-bar" style="height:100%; border-radius:6px; transition: width 0.8s ease; width:0%;"></div>
-                    </div>
-                </div>
-                <div class="chart-wrap" style="height:200px;">
-                    <canvas id="chart-balance-weekly"></canvas>
-                </div>
-                <p style="font-size:0.75rem; color:var(--text-muted); margin-top:8px; text-align:center;">
-                    * Custo das remessas registrado a partir da implantação do histórico de estoque
-                </p>
-            </div>
 
-            <!-- Weekly Consumption Chart -->
-            <div class="glass-panel admin-card">
-                <p class="section-title">Consumos por Semana</p>
-                <p class="section-sub">Número de doses — últimas 12 semanas</p>
-                <div class="chart-wrap">
-                    <canvas id="chart-weekly-count"></canvas>
-                </div>
-            </div>
-
-            <!-- Weekly Value Chart -->
-            <div class="glass-panel admin-card">
-                <p class="section-title">Valor Consumido por Semana</p>
-                <p class="section-sub">Total gasto (R$) — últimas 12 semanas</p>
-                <div class="chart-wrap">
-                    <canvas id="chart-weekly-value"></canvas>
-                </div>
-            </div>
-
-            <!-- Top Users -->
-            <div class="glass-panel admin-card">
-                <p class="section-title">Maiores Consumidores</p>
-                <p class="section-sub">Últimos 30 dias</p>
-                <hr class="divider">
-                <div id="top-users-list">
-                    <p style="color: var(--text-muted); font-size: 0.85rem;">Carregando...</p>
-                </div>
-            </div>
-
-            <!-- ===== STOCK CARD ===== -->
-            <div class="glass-panel admin-card">
-                <h3>Visão de Estoque</h3>
-                <div class="stock-display" id="admin-current-stock">-- g</div>
-                <p>Preço por Dose (10g): <strong id="admin-dose-price">R$ --</strong></p>
-                <hr class="divider">
-                <h4 style="margin-bottom: 12px;">Adicionar Remessa</h4>
-                <div class="input-group small">
-                    <input type="number" id="add-grams" placeholder=" ">
-                    <label for="add-grams">Quantidade em Gramas</label>
-                </div>
-                <div class="input-group small">
-                    <input type="number" id="add-cost" placeholder=" " step="0.01">
-                    <label for="add-cost">Custo Total (R$)</label>
-                </div>
-                <button class="btn btn-primary" id="btn-add-stock" style="margin-top: 10px;">Adicionar ao Estoque</button>
-                <p id="stock-msg" class="action-msg"></p>
-            </div>
-
-            <!-- Stock History Card -->
-            <div class="glass-panel admin-card">
-                <p class="section-title">Histórico de Remessas</p>
-                <p class="section-sub">Últimas 30 entradas de estoque registradas</p>
-                <hr class="divider">
-                <div id="stock-history-wrap" style="overflow-x: auto;">
-                    <table class="data-table" id="stock-history-table">
-                        <thead>
-                            <tr>
-                                <th>Data</th>
-                                <th>Gramas</th>
-                                <th>Custo (R$)</th>
-                                <th>R$/kg</th>
-                                <th>Preço/Dose</th>
-                            </tr>
-                        </thead>
-                        <tbody id="stock-history-body">
-                            <tr><td colspan="5" style="text-align:center; color: var(--text-muted);">Carregando...</td></tr>
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-
-            <!-- Price History Chart -->
-            <div class="glass-panel admin-card">
-                <p class="section-title">Histórico de Preço da Dose</p>
-                <p class="section-sub">Evolução do preço por dose (10g) a cada remessa</p>
-                <div class="chart-wrap">
-                    <canvas id="chart-price-history"></canvas>
-                </div>
-            </div>
-
-            <!-- PIX Card -->
-            <div class="glass-panel admin-card">
-                <h3>Pagamento PIX</h3>
-                <p style="margin-bottom: 10px; color: var(--text-muted); font-size: 0.9rem;">Configure os dados para recebimento das recargas.</p>
-                <div class="input-group small">
-                    <input type="text" id="pix-key-input" placeholder=" ">
-                    <label for="pix-key-input">Chave PIX (E-mail, CPF, Celular...)</label>
-                </div>
-                <button class="btn btn-primary" id="btn-save-pix" style="margin-bottom: 20px; width: 100%;">Salvar Chave PIX</button>
-                <div class="qr-container" style="margin: 0 auto 15px auto;">
-                    <img id="admin-qr-preview" src="" alt="QR Atual" style="max-width: 150px; border-radius: 8px;">
-                </div>
-                <div class="input-group small">
-                    <input type="file" id="qr-file" accept="image/*" style="padding: 10px 0;">
-                </div>
-                <button class="btn btn-secondary" id="btn-upload-qr" style="margin-top: 10px;">Salvar QR Code</button>
-                <p id="qr-msg" class="action-msg"></p>
-            </div>
-
-            <!-- Users Table -->
-            <div class="glass-panel admin-card table-container span-2">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                    <h3>Gestão de Usuários</h3>
-                    <button class="btn btn-outline" id="btn-new-user" style="padding: 5px 15px; font-size: 0.9em; width: auto;">+ Novo Usuário</button>
-                </div>
-                <table id="users-table">
-                    <thead>
-                        <tr>
-                            <th>Nome</th>
-                            <th>Matrícula</th>
-                            <th>Saldo</th>
-                            <th>Ações</th>
-                        </tr>
-                    </thead>
-                    <tbody id="users-tbody">
-                        <tr><td colspan="4" style="text-align:center;">Carregando...</td></tr>
-                    </tbody>
-                </table>
-            </div>
-
-            <!-- Global History -->
-            <div class="glass-panel admin-card table-container span-2">
-                <button id="btn-toggle-history" style="
-                    width: 100%; background: none; border: none; cursor: pointer;
-                    display: flex; justify-content: space-between; align-items: center;
-                    padding: 0; color: inherit; font-family: inherit;
-                " aria-expanded="false">
-                    <h3 style="margin: 0;">Histórico Global de Transações</h3>
-                    <span id="history-toggle-icon" style="font-size: 1.2rem; color: var(--text-muted); transition: transform 0.25s;">▼</span>
-                </button>
-                <div id="history-collapsible" style="display: none; margin-top: 15px; overflow-x: auto;">
-                    <table id="history-table">
-                        <thead>
-                            <tr>
-                                <th>Data/Hora</th>
-                                <th>Usuário</th>
-                                <th>Matrícula</th>
-                                <th>Tipo</th>
-                                <th>Valor</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody id="history-tbody">
-                            <tr><td colspan="6" style="text-align:center;">Carregando...</td></tr>
-                        </tbody>
-                    </table>
+                <div class="glass-panel admin-card">
+                    <h3>Segurança</h3>
+                    <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px;">Gerencie o PIN de acesso ao painel administrativo.</p>
+                    <button class="btn btn-outline" id="btn-open-pin-modal-config" style="width:100%;">Alterar PIN de Acesso</button>
                 </div>
             </div>
         </div>
@@ -740,6 +792,31 @@
         </div>
     </div>
 
+    <script>
+        (function () {
+            const btns = document.querySelectorAll('.tab-btn');
+            const panels = document.querySelectorAll('.tab-panel');
+
+            function switchTab(tabId) {
+                btns.forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
+                panels.forEach(p => p.classList.toggle('active', p.id === 'tab-' + tabId));
+                sessionStorage.setItem('adminTab', tabId);
+                setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+            }
+
+            btns.forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+
+            const saved = sessionStorage.getItem('adminTab');
+            if (saved && document.getElementById('tab-' + saved)) switchTab(saved);
+
+            document.addEventListener('DOMContentLoaded', () => {
+                const cfgPin = document.getElementById('btn-open-pin-modal-config');
+                if (cfgPin) cfgPin.addEventListener('click', () => {
+                    document.getElementById('pin-modal').classList.remove('hidden');
+                });
+            });
+        })();
+    </script>
     <script src="js/admin.js"></script>
 </body>
 
