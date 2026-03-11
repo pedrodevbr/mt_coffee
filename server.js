@@ -411,7 +411,8 @@ app.get('/api/admin/stats/balance', requireAdmin, async (req, res) => {
             SELECT
                 COALESCE(ABS(SUM(amount) FILTER (WHERE type = 'consumption')), 0) AS total_collected,
                 COUNT(*) FILTER (WHERE type = 'consumption')                     AS total_consumptions,
-                COALESCE(SUM(amount) FILTER (WHERE type = 'recharge'), 0)        AS total_recharged
+                COALESCE(SUM(amount) FILTER (WHERE type = 'recharge'), 0)        AS total_recharged,
+                COUNT(*) FILTER (WHERE type = 'recharge')                        AS total_recharges_count
             FROM transactions
         `);
 
@@ -426,7 +427,7 @@ app.get('/api/admin/stats/balance', requireAdmin, async (req, res) => {
             tx_weekly AS (
                 SELECT
                     DATE_TRUNC('week', timestamp AT TIME ZONE 'America/Sao_Paulo') AS week_start,
-                    COALESCE(ABS(SUM(CASE WHEN type = 'consumption' THEN amount END)), 0) AS collected
+                    COALESCE(SUM(CASE WHEN type = 'recharge' THEN amount END), 0) AS collected
                 FROM transactions
                 WHERE timestamp >= NOW() - INTERVAL '8 weeks'
                 GROUP BY 1
@@ -455,10 +456,11 @@ app.get('/api/admin/stats/balance', requireAdmin, async (req, res) => {
             total_remessas:    parseInt(s.total_remessas),
             total_stock_cost:  parseFloat(s.total_stock_cost),
             total_grams_bought: parseFloat(s.total_grams_bought),
-            total_collected:   parseFloat(r.total_collected),
-            total_consumptions: parseInt(r.total_consumptions),
-            total_recharged:   parseFloat(r.total_recharged),
-            balance:           parseFloat(r.total_collected) - parseFloat(s.total_stock_cost),
+            total_collected:       parseFloat(r.total_collected),
+            total_consumptions:    parseInt(r.total_consumptions),
+            total_recharged:       parseFloat(r.total_recharged),
+            total_recharges_count: parseInt(r.total_recharges_count),
+            balance:               parseFloat(r.total_recharged) - parseFloat(s.total_stock_cost),
             weekly:            weeklyResult.rows
         });
     } catch (err) {

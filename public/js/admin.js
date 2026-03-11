@@ -454,9 +454,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             document.getElementById('bal-stock-cost').textContent = `R$ ${fmt(d.total_stock_cost)}`;
             document.getElementById('bal-remessas-count').textContent = `${d.total_remessas} remessa${d.total_remessas !== 1 ? 's' : ''}`;
-            document.getElementById('bal-collected').textContent = `R$ ${fmt(d.total_collected)}`;
-            document.getElementById('bal-consumptions-count').textContent = `${d.total_consumptions} consumos`;
-            document.getElementById('bal-recharged').textContent = `R$ ${fmt(d.total_recharged)}`;
+            document.getElementById('bal-collected').textContent = `R$ ${fmt(d.total_recharged)}`;
+            document.getElementById('bal-consumptions-count').textContent = `${d.total_recharges_count} recarga${d.total_recharges_count !== 1 ? 's' : ''}`;
+            document.getElementById('bal-recharged').textContent = `R$ ${fmt(d.total_collected)}`;
 
             const balEl = document.getElementById('bal-balance');
             const bal = d.balance;
@@ -465,7 +465,7 @@ document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('bal-balance-label').textContent = bal >= 0 ? 'superávit' : 'déficit';
 
             if (d.total_stock_cost > 0) {
-                const pct = Math.min(100, (d.total_collected / d.total_stock_cost) * 100);
+                const pct = Math.min(100, (d.total_recharged / d.total_stock_cost) * 100);
                 document.getElementById('bal-coverage-pct').textContent = `${pct.toFixed(1)}%`;
                 document.getElementById('bal-coverage-bar').style.width = `${pct}%`;
                 document.getElementById('bal-coverage-bar').style.background =
