@@ -115,14 +115,35 @@ app.post('/api/system/stock', requireAdmin, async (req, res) => {
         const { added_grams, added_cost } = req.body;
         if (!added_grams || added_grams <= 0) return res.status(400).json({ error: "Invalid grams" });
 
+        const grams = parseFloat(added_grams);
+        const cost = parseFloat(added_cost || 0);
+
         const stateResult = await pool.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');
         const state = stateResult.rows[0];
 
-        const newGrams = (state ? state.coffee_stock_grams : 0) + parseFloat(added_grams);
-        const newCost = (state ? state.stock_total_cost : 0) + parseFloat(added_cost || 0);
+        const newGrams = (state ? state.coffee_stock_grams : 0) + grams;
+        const newCost = (state ? state.stock_total_cost : 0) + cost;
 
         await pool.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [newGrams, newCost]);
+        await pool.query('INSERT INTO stock_history (added_grams, added_cost) VALUES ($1, $2)', [grams, cost]);
+
         res.json({ success: true, message: "Stock updated successfully", newStock: newGrams });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/admin/stock-history', requireAdmin, async (req, res) => {
+    try {
+        const result = await pool.query(`
+            SELECT id, added_grams, added_cost,
+                   CASE WHEN added_grams > 0 THEN ROUND((added_cost / added_grams * 1000)::numeric, 2) ELSE 0 END AS cost_per_kg,
+                   timestamp
+            FROM stock_history
+            ORDER BY timestamp DESC
+            LIMIT 30
+        `);
+        res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -327,21 +348,19 @@ app.post('/api/recharge', async (req, res) => {
 // =====================
 //  STATS — ADMIN ONLY
 // =====================
-app.get('/api/stats/monthly', requireAdmin, async (req, res) => {
+app.get('/api/stats/weekly', requireAdmin, async (req, res) => {
     try {
         const result = await pool.query(`
             SELECT
-                TO_CHAR(timestamp AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM') AS month,
-                TO_CHAR(timestamp AT TIME ZONE 'America/Sao_Paulo', 'Mon/YY') AS label,
+                DATE_TRUNC('week', timestamp AT TIME ZONE 'America/Sao_Paulo') AS week_start,
+                TO_CHAR(DATE_TRUNC('week', timestamp AT TIME ZONE 'America/Sao_Paulo'), 'DD/MM') AS label,
                 COUNT(*) FILTER (WHERE type = 'consumption') AS consumption_count,
                 COALESCE(ABS(SUM(amount) FILTER (WHERE type = 'consumption')), 0) AS total_consumed_value,
                 COALESCE(SUM(amount) FILTER (WHERE type = 'recharge'), 0) AS total_recharged
             FROM transactions
-            WHERE timestamp >= NOW() - INTERVAL '12 months'
-            GROUP BY
-                TO_CHAR(timestamp AT TIME ZONE 'America/Sao_Paulo', 'YYYY-MM'),
-                TO_CHAR(timestamp AT TIME ZONE 'America/Sao_Paulo', 'Mon/YY')
-            ORDER BY month ASC
+            WHERE timestamp >= NOW() - INTERVAL '12 weeks'
+            GROUP BY DATE_TRUNC('week', timestamp AT TIME ZONE 'America/Sao_Paulo')
+            ORDER BY week_start ASC
         `);
         res.json(result.rows);
     } catch (err) {

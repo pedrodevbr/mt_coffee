@@ -233,21 +233,21 @@
                 </div>
             </div>
 
-            <!-- Monthly Consumption Chart -->
+            <!-- Weekly Consumption Chart -->
             <div class="glass-panel admin-card">
-                <p class="section-title">Consumos por Mês</p>
-                <p class="section-sub">Número de doses — últimos 12 meses</p>
+                <p class="section-title">Consumos por Semana</p>
+                <p class="section-sub">Número de doses — últimas 12 semanas</p>
                 <div class="chart-wrap">
-                    <canvas id="chart-monthly-count"></canvas>
+                    <canvas id="chart-weekly-count"></canvas>
                 </div>
             </div>
 
-            <!-- Monthly Value Chart -->
+            <!-- Weekly Value Chart -->
             <div class="glass-panel admin-card">
-                <p class="section-title">Valor Consumido por Mês</p>
-                <p class="section-sub">Total gasto (R$) — últimos 12 meses</p>
+                <p class="section-title">Valor Consumido por Semana</p>
+                <p class="section-sub">Total gasto (R$) — últimas 12 semanas</p>
                 <div class="chart-wrap">
-                    <canvas id="chart-monthly-value"></canvas>
+                    <canvas id="chart-weekly-value"></canvas>
                 </div>
             </div>
 
@@ -278,6 +278,28 @@
                 </div>
                 <button class="btn btn-primary" id="btn-add-stock" style="margin-top: 10px;">Adicionar ao Estoque</button>
                 <p id="stock-msg" class="action-msg"></p>
+            </div>
+
+            <!-- Stock History Card -->
+            <div class="glass-panel admin-card">
+                <p class="section-title">Histórico de Remessas</p>
+                <p class="section-sub">Últimas 30 entradas de estoque registradas</p>
+                <hr class="divider">
+                <div id="stock-history-wrap" style="overflow-x: auto;">
+                    <table class="data-table" id="stock-history-table">
+                        <thead>
+                            <tr>
+                                <th>Data</th>
+                                <th>Gramas</th>
+                                <th>Custo (R$)</th>
+                                <th>R$/kg</th>
+                            </tr>
+                        </thead>
+                        <tbody id="stock-history-body">
+                            <tr><td colspan="4" style="text-align:center; color: var(--text-muted);">Carregando...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
 
             <!-- PIX Card -->

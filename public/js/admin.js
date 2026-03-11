@@ -199,6 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadUsers();
         loadHistory();
         loadStats();
+        loadStockHistory();
     }
 
     // Check token on load
@@ -232,15 +233,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // =====================
     async function loadStats() {
         try {
-            const [monthlyRes, avgRes] = await Promise.all([
-                authFetch(`${API_URL}/stats/monthly`),
+            const [weeklyRes, avgRes] = await Promise.all([
+                authFetch(`${API_URL}/stats/weekly`),
                 authFetch(`${API_URL}/stats/daily-average`)
             ]);
-            if (!monthlyRes.ok || !avgRes.ok) return;
-            const monthly = await monthlyRes.json();
+            if (!weeklyRes.ok || !avgRes.ok) return;
+            const weekly = await weeklyRes.json();
             const avg = await avgRes.json();
             renderKPIs(avg);
-            renderMonthlyCharts(monthly);
+            renderWeeklyCharts(weekly);
             renderTopUsers(avg.top_users_last_30_days);
         } catch (err) {
             console.error('Error loading stats:', err);
@@ -255,8 +256,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('kpi-days').textContent = data.total_business_days_with_consumption;
     }
 
-    function renderMonthlyCharts(rows) {
-        const labels = rows.map(r => r.label);
+    function renderWeeklyCharts(rows) {
+        const labels = rows.map(r => 'Sem ' + r.label);
         const counts = rows.map(r => parseInt(r.consumption_count));
         const values = rows.map(r => parseFloat(r.total_consumed_value));
 
@@ -276,7 +277,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         if (chartCount) chartCount.destroy();
-        chartCount = new Chart(document.getElementById('chart-monthly-count'), {
+        chartCount = new Chart(document.getElementById('chart-weekly-count'), {
             type: 'bar',
             data: {
                 labels,
@@ -289,7 +290,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (chartValue) chartValue.destroy();
-        chartValue = new Chart(document.getElementById('chart-monthly-value'), {
+        chartValue = new Chart(document.getElementById('chart-weekly-value'), {
             type: 'bar',
             data: {
                 labels,
@@ -339,6 +340,33 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (err) {
             console.error('Error loading state:', err);
+        }
+    }
+
+    async function loadStockHistory() {
+        const tbody = document.getElementById('stock-history-body');
+        if (!tbody) return;
+        try {
+            const res = await authFetch(`${API_URL}/admin/stock-history`);
+            if (!res.ok) { tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">Sem dados</td></tr>'; return; }
+            const rows = await res.json();
+            if (rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted)">Nenhuma remessa registrada ainda.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = rows.map(r => {
+                const date = new Date(r.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+                const costPer = parseFloat(r.cost_per_kg).toFixed(2).replace('.', ',');
+                const cost = parseFloat(r.added_cost).toFixed(2).replace('.', ',');
+                return `<tr>
+                    <td>${date}</td>
+                    <td>${parseFloat(r.added_grams).toFixed(0)} g</td>
+                    <td>R$ ${cost}</td>
+                    <td>R$ ${costPer}</td>
+                </tr>`;
+            }).join('');
+        } catch (err) {
+            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--danger)">Erro ao carregar histórico</td></tr>';
         }
     }
 
@@ -478,6 +506,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 addGramsInput.value = '';
                 addCostInput.value = '';
                 loadSystemState();
+                loadStockHistory();
             }
         } catch {
             showMessage(stockMsg, 'Erro de conexão', true);
