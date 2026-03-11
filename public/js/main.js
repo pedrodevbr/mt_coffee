@@ -43,7 +43,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const pixKeyValue = document.getElementById('pix-key-value');
     const btnDownloadQr = document.getElementById('btn-download-qr');
     const downloadQrContainer = document.getElementById('download-qr-container');
-    const rechargeAmount = document.getElementById('recharge-amount');
     const receiptFile = document.getElementById('receipt-file');
     const receiptUploadMsg = document.getElementById('receipt-upload-msg');
     const userReceiptsWrap = document.getElementById('user-receipts-wrap');
@@ -80,7 +79,6 @@ document.addEventListener('DOMContentLoaded', () => {
     btnConsume.addEventListener('click', handleConsume);
 
     btnShowRecharge.addEventListener('click', () => {
-        rechargeAmount.value = '';
         receiptFile.value = '';
         receiptUploadMsg.textContent = '';
         rechargeModal.classList.remove('hidden');
@@ -276,13 +274,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function handleRecharge() {
-        const amount = parseFloat(rechargeAmount.value);
         const file = receiptFile.files[0];
-        if (isNaN(amount) || amount <= 0) {
-            receiptUploadMsg.style.color = 'var(--danger)';
-            receiptUploadMsg.textContent = 'Informe o valor pago.';
-            return;
-        }
         if (!file) {
             receiptUploadMsg.style.color = 'var(--danger)';
             receiptUploadMsg.textContent = 'Selecione o arquivo do comprovante.';
@@ -294,12 +286,10 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const formData = new FormData();
             formData.append('matricula', currentUser.matricula);
-            formData.append('amount_declared', amount);
             formData.append('comprovante', file);
             const res = await fetch(`${API_URL}/receipts`, { method: 'POST', body: formData });
             const data = await res.json();
             if (res.ok) {
-                rechargeAmount.value = '';
                 receiptFile.value = '';
                 receiptUploadMsg.style.color = 'var(--success)';
                 receiptUploadMsg.textContent = '✓ Comprovante enviado! Aguardando aprovação.';

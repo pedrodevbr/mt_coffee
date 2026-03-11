@@ -486,15 +486,11 @@ app.delete('/api/admin/transactions/:id', requireAdmin, async (req, res) => {
 app.post('/api/receipts', uploadReceipt.single('comprovante'), async (req, res) => {
     try {
         const { matricula, amount_declared } = req.body;
-        if (!matricula || !amount_declared || !req.file) {
+        if (!matricula || !req.file) {
             if (req.file) fs.unlinkSync(req.file.path);
-            return res.status(400).json({ error: 'Matrícula, valor e comprovante são obrigatórios.' });
+            return res.status(400).json({ error: 'Matrícula e comprovante são obrigatórios.' });
         }
-        const amount = parseFloat(amount_declared);
-        if (isNaN(amount) || amount <= 0) {
-            fs.unlinkSync(req.file.path);
-            return res.status(400).json({ error: 'Valor inválido.' });
-        }
+        const amount = amount_declared ? parseFloat(amount_declared) : 0;
         const userResult = await pool.query('SELECT id FROM users WHERE matricula=$1', [matricula]);
         if (userResult.rows.length === 0) {
             fs.unlinkSync(req.file.path);
