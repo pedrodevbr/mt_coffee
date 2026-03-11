@@ -397,6 +397,75 @@ app.post('/api/recharge', async (req, res) => {
     }
 });
 
+app.get('/api/admin/stats/balance', requireAdmin, async (req, res) => {
+    try {
+        const stockResult = await pool.query(`
+            SELECT
+                COUNT(*)                                            AS total_remessas,
+                COALESCE(SUM(added_cost), 0)                       AS total_stock_cost,
+                COALESCE(SUM(added_grams), 0)                      AS total_grams_bought
+            FROM stock_history
+        `);
+
+        const revenueResult = await pool.query(`
+            SELECT
+                COALESCE(ABS(SUM(amount) FILTER (WHERE type = 'consumption')), 0) AS total_collected,
+                COUNT(*) FILTER (WHERE type = 'consumption')                     AS total_consumptions,
+                COALESCE(SUM(amount) FILTER (WHERE type = 'recharge'), 0)        AS total_recharged
+            FROM transactions
+        `);
+
+        const weeklyResult = await pool.query(`
+            WITH weeks AS (
+                SELECT generate_series(
+                    DATE_TRUNC('week', NOW() AT TIME ZONE 'America/Sao_Paulo') - INTERVAL '7 weeks',
+                    DATE_TRUNC('week', NOW() AT TIME ZONE 'America/Sao_Paulo'),
+                    '1 week'
+                ) AS week_start
+            ),
+            tx_weekly AS (
+                SELECT
+                    DATE_TRUNC('week', timestamp AT TIME ZONE 'America/Sao_Paulo') AS week_start,
+                    COALESCE(ABS(SUM(CASE WHEN type = 'consumption' THEN amount END)), 0) AS collected
+                FROM transactions
+                WHERE timestamp >= NOW() - INTERVAL '8 weeks'
+                GROUP BY 1
+            ),
+            stock_weekly AS (
+                SELECT
+                    DATE_TRUNC('week', timestamp AT TIME ZONE 'America/Sao_Paulo') AS week_start,
+                    COALESCE(SUM(added_cost), 0) AS cost
+                FROM stock_history
+                WHERE timestamp >= NOW() - INTERVAL '8 weeks'
+                GROUP BY 1
+            )
+            SELECT
+                TO_CHAR(w.week_start, 'DD/MM') AS label,
+                COALESCE(tx.collected, 0)      AS collected,
+                COALESCE(st.cost, 0)           AS cost
+            FROM weeks w
+            LEFT JOIN tx_weekly tx  ON tx.week_start  = w.week_start
+            LEFT JOIN stock_weekly st ON st.week_start = w.week_start
+            ORDER BY w.week_start ASC
+        `);
+
+        const s = stockResult.rows[0];
+        const r = revenueResult.rows[0];
+        res.json({
+            total_remessas:    parseInt(s.total_remessas),
+            total_stock_cost:  parseFloat(s.total_stock_cost),
+            total_grams_bought: parseFloat(s.total_grams_bought),
+            total_collected:   parseFloat(r.total_collected),
+            total_consumptions: parseInt(r.total_consumptions),
+            total_recharged:   parseFloat(r.total_recharged),
+            balance:           parseFloat(r.total_collected) - parseFloat(s.total_stock_cost),
+            weekly:            weeklyResult.rows
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // =====================
 //  STATS — ADMIN ONLY
 // =====================

@@ -192,6 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let chartValue = null;
     let chartPrice = null;
     let chartUserWeekly = null;
+    let chartBalance = null;
 
     // =====================
     //  INIT
@@ -203,6 +204,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadStats();
         loadStockHistory();
         loadPriceHistory();
+        loadBalanceCard();
     }
 
     // Check token on load
@@ -442,6 +444,68 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    async function loadBalanceCard() {
+        try {
+            const res = await authFetch(`${API_URL}/admin/stats/balance`);
+            if (!res.ok) return;
+            const d = await res.json();
+
+            const fmt = v => parseFloat(v).toFixed(2).replace('.', ',');
+
+            document.getElementById('bal-stock-cost').textContent = `R$ ${fmt(d.total_stock_cost)}`;
+            document.getElementById('bal-remessas-count').textContent = `${d.total_remessas} remessa${d.total_remessas !== 1 ? 's' : ''}`;
+            document.getElementById('bal-collected').textContent = `R$ ${fmt(d.total_collected)}`;
+            document.getElementById('bal-consumptions-count').textContent = `${d.total_consumptions} consumos`;
+            document.getElementById('bal-recharged').textContent = `R$ ${fmt(d.total_recharged)}`;
+
+            const balEl = document.getElementById('bal-balance');
+            const bal = d.balance;
+            balEl.textContent = `R$ ${fmt(Math.abs(bal))}`;
+            balEl.style.color = bal >= 0 ? '#4ade80' : '#f87171';
+            document.getElementById('bal-balance-label').textContent = bal >= 0 ? 'superávit' : 'déficit';
+
+            if (d.total_stock_cost > 0) {
+                const pct = Math.min(100, (d.total_collected / d.total_stock_cost) * 100);
+                document.getElementById('bal-coverage-pct').textContent = `${pct.toFixed(1)}%`;
+                document.getElementById('bal-coverage-bar').style.width = `${pct}%`;
+                document.getElementById('bal-coverage-bar').style.background =
+                    pct >= 100 ? '#4ade80' : pct >= 70 ? '#f59e0b' : '#f87171';
+                document.getElementById('bal-bar-wrap').style.display = 'block';
+            }
+
+            const gridColor = 'rgba(255,255,255,0.07)';
+            const tickColor = '#94a3b8';
+            const labels = d.weekly.map(r => 'Sem ' + r.label);
+            const collected = d.weekly.map(r => parseFloat(r.collected));
+            const cost = d.weekly.map(r => parseFloat(r.cost));
+
+            if (chartBalance) chartBalance.destroy();
+            chartBalance = new Chart(document.getElementById('chart-balance-weekly'), {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        { label: 'Arrecadado', data: collected, backgroundColor: '#4ade8099', borderColor: '#4ade80', borderWidth: 2, borderRadius: 5 },
+                        { label: 'Custo Remessa', data: cost,      backgroundColor: '#f8717199', borderColor: '#f87171', borderWidth: 2, borderRadius: 5 }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: true, labels: { color: tickColor, font: { size: 11 }, boxWidth: 12 } },
+                        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: R$ ${ctx.parsed.y.toFixed(2).replace('.', ',')}` } }
+                    },
+                    scales: {
+                        x: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: gridColor } },
+                        y: { ticks: { color: tickColor, font: { size: 10 }, callback: v => `R$${v.toFixed(0)}` }, grid: { color: gridColor }, beginAtZero: true }
+                    }
+                }
+            });
+        } catch (err) {
+            console.error('Error loading balance card:', err);
+        }
+    }
+
     async function handleSavePix() {
         const pix_key = pixKeyInput.value.trim();
         btnSavePix.disabled = true;
@@ -581,6 +645,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 loadSystemState();
                 loadStockHistory();
                 loadPriceHistory();
+                loadBalanceCard();
             }
         } catch {
             showMessage(stockMsg, 'Erro de conexão', true);
