@@ -107,26 +107,41 @@ app.post('/api/admin/pin', requireAdmin, async (req, res) => {
 // =====================
 app.get('/api/system', async (req, res) => {
     try {
-        const [stateResult, settingResult, extraResult] = await Promise.all([
+        const [stateResult, settingResult, extraResult, consumptionResult] = await Promise.all([
             pool.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1'),
             pool.query("SELECT value FROM settings WHERE key = $1", ['dose_grams']),
-            pool.query('SELECT COALESCE(SUM(amount), 0) AS total FROM extra_costs')
+            pool.query('SELECT COALESCE(SUM(amount), 0) AS total FROM extra_costs'),
+            pool.query("SELECT COUNT(*) AS cnt FROM transactions WHERE type='consumption' AND timestamp >= NOW() - INTERVAL '30 days'")
         ]);
 
         const doseGrams = settingResult.rows.length ? parseFloat(settingResult.rows[0].value) : 10;
         const state = stateResult.rows.length ? stateResult.rows[0] : { coffee_stock_grams: 0, stock_total_cost: 0, qr_code_url: '', pix_key: '' };
         const extraTotal = parseFloat(extraResult.rows[0].total);
 
-        let currentPricePerDose = 0;
+        const dosesLast30 = parseInt(consumptionResult.rows[0].cnt);
+        const avgDailyDoses = dosesLast30 / 30;
+        const WORKING_DAYS = 20;
+        const monthlyEstimatedDoses = Math.round(avgDailyDoses * WORKING_DAYS);
+        const extraCostPerDose = (extraTotal > 0 && monthlyEstimatedDoses > 0)
+            ? extraTotal / monthlyEstimatedDoses
+            : 0;
+
+        let basePricePerDose = 0;
         if (state.coffee_stock_grams > 0) {
-            currentPricePerDose = ((state.stock_total_cost + extraTotal) / state.coffee_stock_grams) * doseGrams;
+            basePricePerDose = (state.stock_total_cost / state.coffee_stock_grams) * doseGrams;
         }
+        const currentPricePerDose = basePricePerDose + extraCostPerDose;
 
         res.json({
             ...state,
             dose_grams: doseGrams,
             current_price_per_dose: currentPricePerDose,
-            extra_costs_total: extraTotal
+            base_price_per_dose: basePricePerDose,
+            extra_costs_total: extraTotal,
+            extra_cost_per_dose: extraCostPerDose,
+            avg_daily_doses: parseFloat(avgDailyDoses.toFixed(2)),
+            monthly_estimated_doses: monthlyEstimatedDoses,
+            doses_last_30_days: dosesLast30
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
