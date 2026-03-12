@@ -107,22 +107,26 @@ app.post('/api/admin/pin', requireAdmin, async (req, res) => {
 // =====================
 app.get('/api/system', async (req, res) => {
     try {
-        const stateResult = await pool.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');
-        const settingResult = await pool.query("SELECT value FROM settings WHERE key = $1", ['dose_grams']);
+        const [stateResult, settingResult, extraResult] = await Promise.all([
+            pool.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1'),
+            pool.query("SELECT value FROM settings WHERE key = $1", ['dose_grams']),
+            pool.query('SELECT COALESCE(SUM(amount), 0) AS total FROM extra_costs')
+        ]);
 
         const doseGrams = settingResult.rows.length ? parseFloat(settingResult.rows[0].value) : 10;
         const state = stateResult.rows.length ? stateResult.rows[0] : { coffee_stock_grams: 0, stock_total_cost: 0, qr_code_url: '', pix_key: '' };
+        const extraTotal = parseFloat(extraResult.rows[0].total);
 
         let currentPricePerDose = 0;
         if (state.coffee_stock_grams > 0) {
-            const costPerGram = state.stock_total_cost / state.coffee_stock_grams;
-            currentPricePerDose = costPerGram * doseGrams;
+            currentPricePerDose = ((state.stock_total_cost + extraTotal) / state.coffee_stock_grams) * doseGrams;
         }
 
         res.json({
             ...state,
             dose_grams: doseGrams,
-            current_price_per_dose: currentPricePerDose
+            current_price_per_dose: currentPricePerDose,
+            extra_costs_total: extraTotal
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -233,6 +237,41 @@ app.delete('/api/admin/stock-history/:id', requireAdmin, async (req, res) => {
         res.status(500).json({ error: err.message });
     } finally {
         client.release();
+    }
+});
+
+app.get('/api/admin/extra-costs', requireAdmin, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM extra_costs ORDER BY created_at DESC');
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/admin/extra-costs', requireAdmin, async (req, res) => {
+    const { description, amount } = req.body;
+    if (!description || !description.trim()) return res.status(400).json({ error: 'Descrição obrigatória.' });
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt <= 0) return res.status(400).json({ error: 'Valor inválido.' });
+    try {
+        const result = await pool.query(
+            'INSERT INTO extra_costs (description, amount) VALUES ($1, $2) RETURNING *',
+            [description.trim(), amt]
+        );
+        res.json(result.rows[0]);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/admin/extra-costs/:id', requireAdmin, async (req, res) => {
+    try {
+        const result = await pool.query('DELETE FROM extra_costs WHERE id=$1 RETURNING id', [req.params.id]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Custo não encontrado.' });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 

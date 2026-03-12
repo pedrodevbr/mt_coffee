@@ -468,6 +468,7 @@
                     <h3>Visão de Estoque</h3>
                     <div class="stock-display" id="admin-current-stock">-- g</div>
                     <p>Preço por Dose (10g): <strong id="admin-dose-price">R$ --</strong></p>
+                    <p style="font-size:0.82rem; color:var(--text-muted); margin-top:4px;">Custos extras acumulados: <strong id="admin-extra-total" style="color:#f59e0b;">R$ --</strong></p>
                     <hr class="divider">
                     <h4 style="margin-bottom: 12px;">Adicionar Remessa</h4>
                     <div class="input-group small">
@@ -480,6 +481,23 @@
                     </div>
                     <button class="btn btn-primary" id="btn-add-stock" style="margin-top: 10px;">Adicionar ao Estoque</button>
                     <p id="stock-msg" class="action-msg"></p>
+                </div>
+
+                <div class="glass-panel admin-card">
+                    <p class="section-title">Custos Extras</p>
+                    <p class="section-sub">Gastos adicionais que impactam o custo unitário da dose (frete, embalagem, etc.)</p>
+                    <hr class="divider">
+                    <div class="input-group small">
+                        <input type="text" id="extra-cost-desc" placeholder=" " maxlength="100">
+                        <label for="extra-cost-desc">Descrição</label>
+                    </div>
+                    <div class="input-group small">
+                        <input type="number" id="extra-cost-amount" placeholder=" " step="0.01" min="0.01">
+                        <label for="extra-cost-amount">Valor (R$)</label>
+                    </div>
+                    <button class="btn btn-primary" id="btn-add-extra-cost" style="margin-top: 10px;">Adicionar Custo</button>
+                    <p id="extra-cost-msg" class="action-msg"></p>
+                    <div id="extra-costs-list" style="margin-top: 14px;"></div>
                 </div>
 
                 <div class="glass-panel admin-card">

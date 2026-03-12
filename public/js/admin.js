@@ -229,6 +229,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadPriceHistory();
         loadBalanceCard();
         loadReceipts();
+        loadExtraCosts();
     }
 
     // Check token on load
@@ -365,12 +366,79 @@ document.addEventListener('DOMContentLoaded', () => {
                 const state = await res.json();
                 adminCurrentStock.textContent = `${parseFloat(state.coffee_stock_grams).toFixed(0)} g`;
                 adminDosePrice.textContent = `R$ ${parseFloat(state.current_price_per_dose).toFixed(2).replace('.', ',')}`;
+                const extraEl = document.getElementById('admin-extra-total');
+                if (extraEl) extraEl.textContent = `R$ ${parseFloat(state.extra_costs_total || 0).toFixed(2).replace('.', ',')}`;
                 if (state.qr_code_url) qrPreview.src = state.qr_code_url;
                 if (state.pix_key) pixKeyInput.value = state.pix_key;
             }
         } catch (err) {
             console.error('Error loading state:', err);
         }
+    }
+
+    async function loadExtraCosts() {
+        const list = document.getElementById('extra-costs-list');
+        if (!list) return;
+        try {
+            const res = await authFetch(`${API_URL}/admin/extra-costs`);
+            if (!res.ok) return;
+            const costs = await res.json();
+            if (costs.length === 0) {
+                list.innerHTML = '<p style="color:var(--text-muted); font-size:0.85rem; text-align:center;">Nenhum custo extra registrado.</p>';
+                return;
+            }
+            list.innerHTML = costs.map(c => {
+                const date = new Date(c.created_at).toLocaleDateString('pt-BR');
+                const amt = parseFloat(c.amount).toFixed(2).replace('.', ',');
+                return `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.07);">
+                    <div>
+                        <div style="font-weight:500; font-size:0.9rem;">${c.description}</div>
+                        <div style="color:var(--text-muted); font-size:0.78rem;">${date}</div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                        <span style="color:#f59e0b; font-weight:600;">R$ ${amt}</span>
+                        <button data-id="${c.id}" class="btn-del-extra"
+                            style="background:none; border:1px solid #ef4444; color:#f87171; border-radius:5px; padding:2px 8px; cursor:pointer; font-size:0.78rem;">✕</button>
+                    </div>
+                </div>`;
+            }).join('');
+            list.querySelectorAll('.btn-del-extra').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    if (!confirm('Remover este custo extra?')) return;
+                    const r = await authFetch(`${API_URL}/admin/extra-costs/${btn.dataset.id}`, { method: 'DELETE', headers: authHeaders() });
+                    if (r.ok) { await loadExtraCosts(); await loadSystemState(); }
+                    else { const d = await r.json(); alert(d.error || 'Erro ao remover.'); }
+                });
+            });
+        } catch { list.innerHTML = '<p style="color:var(--danger); font-size:0.85rem;">Erro ao carregar custos.</p>'; }
+    }
+
+    const btnAddExtraCost = document.getElementById('btn-add-extra-cost');
+    if (btnAddExtraCost) {
+        btnAddExtraCost.addEventListener('click', async () => {
+            const desc = document.getElementById('extra-cost-desc').value.trim();
+            const amt = document.getElementById('extra-cost-amount').value;
+            const msgEl = document.getElementById('extra-cost-msg');
+            msgEl.textContent = '';
+            const res = await authFetch(`${API_URL}/admin/extra-costs`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ description: desc, amount: amt })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                document.getElementById('extra-cost-desc').value = '';
+                document.getElementById('extra-cost-amount').value = '';
+                msgEl.style.color = 'var(--success)';
+                msgEl.textContent = '✓ Custo adicionado!';
+                await loadExtraCosts();
+                await loadSystemState();
+                setTimeout(() => { msgEl.textContent = ''; }, 2500);
+            } else {
+                msgEl.style.color = '#f87171';
+                msgEl.textContent = data.error || 'Erro ao adicionar.';
+            }
+        });
     }
 
     async function loadStockHistory() {
