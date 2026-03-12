@@ -484,13 +484,25 @@ app.post('/api/consume', async (req, res) => {
         }
 
         const costPerGram = state.stock_total_cost / state.coffee_stock_grams;
-        const pricePerDose = costPerGram * doseGrams;
+        const basePricePerDose = costPerGram * doseGrams;
+
+        const [extraResult, consumptionResult] = await Promise.all([
+            client.query('SELECT COALESCE(SUM(amount), 0) AS total FROM extra_costs'),
+            client.query("SELECT COUNT(*) AS cnt FROM transactions WHERE type='consumption' AND timestamp >= NOW() - INTERVAL '30 days'")
+        ]);
+        const extraTotal = parseFloat(extraResult.rows[0].total);
+        const dosesLast30 = parseInt(consumptionResult.rows[0].cnt);
+        const monthlyEstimatedDoses = Math.round((dosesLast30 / 30) * 20);
+        const extraCostPerDose = (extraTotal > 0 && monthlyEstimatedDoses > 0)
+            ? extraTotal / monthlyEstimatedDoses
+            : 0;
+        const pricePerDose = basePricePerDose + extraCostPerDose;
 
         await client.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [pricePerDose, user.id]);
         await client.query('INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, $3)', [user.id, -pricePerDose, 'consumption']);
 
         const newStock = state.coffee_stock_grams - doseGrams;
-        const newCost = state.stock_total_cost - pricePerDose;
+        const newCost = state.stock_total_cost - basePricePerDose;
         await client.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [newStock, newCost]);
 
         await client.query('COMMIT');

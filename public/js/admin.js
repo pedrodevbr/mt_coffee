@@ -593,6 +593,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 data: {
                     labels,
                     datasets: [{
+                        label: 'Custo café/dose (sem extras)',
                         data: prices,
                         borderColor: green,
                         backgroundColor: `${green}22`,
