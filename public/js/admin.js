@@ -373,22 +373,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 const dilutionEl = document.getElementById('extra-cost-dilution-info');
                 if (dilutionEl) {
                     const extraTotal = parseFloat(state.extra_costs_total || 0);
-                    const monthlyDoses = state.monthly_estimated_doses || 0;
-                    const avgDaily = parseFloat(state.avg_daily_doses || 0);
                     const extraPerDose = parseFloat(state.extra_cost_per_dose || 0);
                     const basePpd = parseFloat(state.base_price_per_dose || 0);
+                    const dilutionDoses = state.dilution_doses || 1000;
 
                     if (extraTotal <= 0) {
                         dilutionEl.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem; text-align:center; margin-top:10px;">Nenhum custo extra ativo.</p>';
-                    } else if (monthlyDoses === 0) {
-                        dilutionEl.innerHTML = '<p style="color:#f87171; font-size:0.82rem; margin-top:10px;">⚠ Sem histórico de consumo para calcular a diluição. Registre consumos primeiro.</p>';
                     } else {
                         dilutionEl.innerHTML = `
                             <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:8px; padding:12px; margin-top:10px; font-size:0.82rem; line-height:1.7;">
-                                <div style="font-weight:600; margin-bottom:6px; color:#f59e0b;">📊 Diluição dos custos extras</div>
-                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Consumo médio (30 dias)</span><strong>${avgDaily.toFixed(1)} doses/dia</strong></div>
-                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Doses estimadas/mês (20 dias úteis)</span><strong>${monthlyDoses} doses</strong></div>
+                                <div style="font-weight:600; margin-bottom:6px; color:#f59e0b;">Diluição dos custos extras</div>
                                 <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Total de custos extras</span><strong>R$ ${extraTotal.toFixed(2).replace('.', ',')}</strong></div>
+                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Diluído em</span><strong>${dilutionDoses} doses</strong></div>
                                 <hr style="border:none; border-top:1px solid rgba(245,158,11,0.2); margin:6px 0;">
                                 <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Custo base/dose (café)</span><span>R$ ${basePpd.toFixed(4).replace('.', ',')}</span></div>
                                 <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">+ Custo extra/dose</span><span style="color:#f59e0b;">+ R$ ${extraPerDose.toFixed(4).replace('.', ',')}</span></div>

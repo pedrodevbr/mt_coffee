@@ -107,24 +107,18 @@ app.post('/api/admin/pin', requireAdmin, async (req, res) => {
 // =====================
 app.get('/api/system', async (req, res) => {
     try {
-        const [stateResult, settingResult, extraResult, consumptionResult] = await Promise.all([
+        const [stateResult, settingResult, extraResult] = await Promise.all([
             pool.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1'),
             pool.query("SELECT value FROM settings WHERE key = $1", ['dose_grams']),
-            pool.query('SELECT COALESCE(SUM(amount), 0) AS total FROM extra_costs'),
-            pool.query("SELECT COUNT(*) AS cnt FROM transactions WHERE type='consumption' AND timestamp >= NOW() - INTERVAL '30 days'")
+            pool.query('SELECT COALESCE(SUM(amount), 0) AS total FROM extra_costs')
         ]);
 
         const doseGrams = settingResult.rows.length ? parseFloat(settingResult.rows[0].value) : 10;
         const state = stateResult.rows.length ? stateResult.rows[0] : { coffee_stock_grams: 0, stock_total_cost: 0, qr_code_url: '', pix_key: '' };
         const extraTotal = parseFloat(extraResult.rows[0].total);
 
-        const dosesLast30 = parseInt(consumptionResult.rows[0].cnt);
-        const avgDailyDoses = dosesLast30 / 30;
-        const WORKING_DAYS = 20;
-        const monthlyEstimatedDoses = Math.round(avgDailyDoses * WORKING_DAYS);
-        const extraCostPerDose = (extraTotal > 0 && monthlyEstimatedDoses > 0)
-            ? extraTotal / monthlyEstimatedDoses
-            : 0;
+        const DILUTION_DOSES = 1000;
+        const extraCostPerDose = extraTotal / DILUTION_DOSES;
 
         let basePricePerDose = 0;
         if (state.coffee_stock_grams > 0) {
@@ -139,9 +133,7 @@ app.get('/api/system', async (req, res) => {
             base_price_per_dose: basePricePerDose,
             extra_costs_total: extraTotal,
             extra_cost_per_dose: extraCostPerDose,
-            avg_daily_doses: parseFloat(avgDailyDoses.toFixed(2)),
-            monthly_estimated_doses: monthlyEstimatedDoses,
-            doses_last_30_days: dosesLast30
+            dilution_doses: DILUTION_DOSES
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -486,16 +478,9 @@ app.post('/api/consume', async (req, res) => {
         const costPerGram = state.stock_total_cost / state.coffee_stock_grams;
         const basePricePerDose = costPerGram * doseGrams;
 
-        const [extraResult, consumptionResult] = await Promise.all([
-            client.query('SELECT COALESCE(SUM(amount), 0) AS total FROM extra_costs'),
-            client.query("SELECT COUNT(*) AS cnt FROM transactions WHERE type='consumption' AND timestamp >= NOW() - INTERVAL '30 days'")
-        ]);
+        const extraResult = await client.query('SELECT COALESCE(SUM(amount), 0) AS total FROM extra_costs');
         const extraTotal = parseFloat(extraResult.rows[0].total);
-        const dosesLast30 = parseInt(consumptionResult.rows[0].cnt);
-        const monthlyEstimatedDoses = Math.round((dosesLast30 / 30) * 20);
-        const extraCostPerDose = (extraTotal > 0 && monthlyEstimatedDoses > 0)
-            ? extraTotal / monthlyEstimatedDoses
-            : 0;
+        const extraCostPerDose = extraTotal / 1000;
         const pricePerDose = basePricePerDose + extraCostPerDose;
 
         await client.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [pricePerDose, user.id]);
