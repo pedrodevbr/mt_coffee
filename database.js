@@ -58,6 +58,18 @@ async function initSchema() {
         `);
 
         await client.query(`
+            CREATE TABLE IF NOT EXISTS stock_adjustments (
+                id SERIAL PRIMARY KEY,
+                grams_before REAL NOT NULL,
+                grams_after  REAL NOT NULL,
+                delta_grams  REAL NOT NULL,
+                delta_cost   REAL NOT NULL,
+                reason       TEXT,
+                timestamp    TIMESTAMPTZ DEFAULT NOW()
+            )
+        `);
+
+        await client.query(`
             CREATE TABLE IF NOT EXISTS extra_costs (
                 id SERIAL PRIMARY KEY,
                 description TEXT NOT NULL,

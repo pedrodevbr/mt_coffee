@@ -484,6 +484,27 @@
                 </div>
 
                 <div class="glass-panel admin-card">
+                    <p class="section-title">Acerto de Estoque</p>
+                    <p class="section-sub">Corrija o estoque virtual quando o físico estiver diferente</p>
+                    <hr class="divider">
+                    <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:12px;">
+                        Estoque virtual atual: <strong id="adjust-virtual-stock" style="color:var(--text-primary);">-- g</strong>
+                    </p>
+                    <div class="input-group small">
+                        <input type="number" id="adjust-physical-grams" placeholder=" " step="1" min="0">
+                        <label for="adjust-physical-grams">Estoque físico real (g)</label>
+                    </div>
+                    <div id="adjust-preview" style="min-height:22px; font-size:0.82rem; margin:6px 0 10px;"></div>
+                    <div class="input-group small">
+                        <input type="text" id="adjust-reason" placeholder=" " maxlength="120">
+                        <label for="adjust-reason">Motivo (opcional)</label>
+                    </div>
+                    <button class="btn btn-primary" id="btn-apply-adjustment" style="margin-top:10px;">Registrar Acerto</button>
+                    <p id="adjust-msg" class="action-msg"></p>
+                    <div id="adjustments-list" style="margin-top:16px;"></div>
+                </div>
+
+                <div class="glass-panel admin-card">
                     <p class="section-title">Custos Extras</p>
                     <p class="section-sub">Gastos adicionais que impactam o custo unitário da dose (frete, embalagem, etc.)</p>
                     <hr class="divider">

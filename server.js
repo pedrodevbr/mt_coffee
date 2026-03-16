@@ -197,9 +197,15 @@ async function recalculateStockState(client) {
     const totalCost = parseFloat(stockSum.rows[0].tc);
     const consResult = await client.query("SELECT COUNT(*) AS cnt FROM transactions WHERE type='consumption'");
     const consumedGrams = parseInt(consResult.rows[0].cnt) * doseGrams;
-    const currentStock = Math.max(0, totalGrams - consumedGrams);
-    await client.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [currentStock, totalCost]);
-    return { currentStock, totalCost };
+    const adjResult = await client.query(
+        'SELECT COALESCE(SUM(delta_grams),0) AS dg, COALESCE(SUM(delta_cost),0) AS dc FROM stock_adjustments'
+    );
+    const adjGrams = parseFloat(adjResult.rows[0].dg);
+    const adjCost  = parseFloat(adjResult.rows[0].dc);
+    const currentStock = Math.max(0, totalGrams - consumedGrams + adjGrams);
+    const currentCost  = Math.max(0, totalCost + adjCost);
+    await client.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [currentStock, currentCost]);
+    return { currentStock, totalCost: currentCost };
 }
 
 app.put('/api/admin/stock-history/:id', requireAdmin, async (req, res) => {
@@ -244,6 +250,54 @@ app.delete('/api/admin/stock-history/:id', requireAdmin, async (req, res) => {
         res.status(500).json({ error: err.message });
     } finally {
         client.release();
+    }
+});
+
+// =====================
+//  STOCK ADJUSTMENTS
+// =====================
+app.post('/api/admin/stock/adjust', requireAdmin, async (req, res) => {
+    const { physical_grams, reason } = req.body;
+    const physicalGrams = parseFloat(physical_grams);
+    if (isNaN(physicalGrams) || physicalGrams < 0) return res.status(400).json({ error: 'Quantidade inválida.' });
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const stateResult = await client.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');
+        const state = stateResult.rows[0];
+        const currentGrams = parseFloat(state.coffee_stock_grams);
+        const currentCost  = parseFloat(state.stock_total_cost);
+        if (Math.abs(physicalGrams - currentGrams) < 0.01) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({ error: 'Estoque físico igual ao virtual. Nenhum ajuste necessário.' });
+        }
+        const deltaGrams = physicalGrams - currentGrams;
+        const costPerGram = currentGrams > 0 ? currentCost / currentGrams : 0;
+        const deltaCost   = deltaGrams * costPerGram;
+        await client.query(
+            'INSERT INTO stock_adjustments (grams_before, grams_after, delta_grams, delta_cost, reason) VALUES ($1,$2,$3,$4,$5)',
+            [currentGrams, physicalGrams, deltaGrams, deltaCost, reason || null]
+        );
+        await client.query(
+            'UPDATE system_state SET coffee_stock_grams=$1, stock_total_cost=$2',
+            [Math.max(0, physicalGrams), Math.max(0, currentCost + deltaCost)]
+        );
+        await client.query('COMMIT');
+        res.json({ success: true, grams_before: currentGrams, grams_after: physicalGrams, delta_grams: deltaGrams });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+app.get('/api/admin/stock/adjustments', requireAdmin, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM stock_adjustments ORDER BY timestamp DESC LIMIT 30');
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
     }
 });
 

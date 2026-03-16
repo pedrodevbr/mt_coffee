@@ -230,6 +230,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadBalanceCard();
         loadReceipts();
         loadExtraCosts();
+        loadAdjustments();
     }
 
     // Check token on load
@@ -367,6 +368,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 adminCurrentStock.textContent = `${parseFloat(state.coffee_stock_grams).toFixed(0)} g`;
                 adminDosePrice.textContent = `R$ ${parseFloat(state.current_price_per_dose).toFixed(2).replace('.', ',')}`;
 
+                const adjVirtualEl = document.getElementById('adjust-virtual-stock');
+                if (adjVirtualEl) adjVirtualEl.textContent = `${parseFloat(state.coffee_stock_grams).toFixed(0)} g`;
+
                 const extraTotalEl = document.getElementById('admin-extra-total');
                 if (extraTotalEl) extraTotalEl.textContent = `R$ ${parseFloat(state.extra_costs_total || 0).toFixed(2).replace('.', ',')}`;
 
@@ -462,6 +466,93 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 msgEl.style.color = '#f87171';
                 msgEl.textContent = data.error || 'Erro ao adicionar.';
+            }
+        });
+    }
+
+    // =====================
+    //  STOCK ADJUSTMENTS
+    // =====================
+    async function loadAdjustments() {
+        const list = document.getElementById('adjustments-list');
+        if (!list) return;
+        try {
+            const res = await authFetch(`${API_URL}/admin/stock/adjustments`);
+            if (!res.ok) return;
+            const rows = await res.json();
+            if (rows.length === 0) {
+                list.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem; text-align:center;">Nenhum acerto registrado.</p>';
+                return;
+            }
+            list.innerHTML = `
+                <p style="font-size:0.78rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Histórico de acertos</p>
+                ${rows.map(r => {
+                    const date = new Date(r.timestamp).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' });
+                    const delta = parseFloat(r.delta_grams);
+                    const sign = delta >= 0 ? '+' : '';
+                    const color = delta >= 0 ? '#22c55e' : '#f87171';
+                    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid rgba(255,255,255,0.06); font-size:0.82rem;">
+                        <div>
+                            <div style="font-weight:500;">${parseFloat(r.grams_before).toFixed(0)} g → ${parseFloat(r.grams_after).toFixed(0)} g</div>
+                            <div style="color:var(--text-muted); font-size:0.76rem;">${date}${r.reason ? ' · ' + r.reason : ''}</div>
+                        </div>
+                        <span style="font-weight:700; color:${color};">${sign}${delta.toFixed(0)} g</span>
+                    </div>`;
+                }).join('')}`;
+        } catch { list.innerHTML = '<p style="color:var(--danger); font-size:0.82rem;">Erro ao carregar histórico.</p>'; }
+    }
+
+    const adjustPhysicalInput = document.getElementById('adjust-physical-grams');
+    const adjustPreview = document.getElementById('adjust-preview');
+
+    if (adjustPhysicalInput && adjustPreview) {
+        adjustPhysicalInput.addEventListener('input', () => {
+            const virtualEl = document.getElementById('adjust-virtual-stock');
+            const virtualGrams = parseFloat(virtualEl?.textContent) || 0;
+            const physicalGrams = parseFloat(adjustPhysicalInput.value);
+            if (isNaN(physicalGrams) || adjustPhysicalInput.value === '') {
+                adjustPreview.innerHTML = '';
+                return;
+            }
+            const delta = physicalGrams - virtualGrams;
+            const sign = delta >= 0 ? '+' : '';
+            const color = delta >= 0 ? '#22c55e' : '#f87171';
+            adjustPreview.innerHTML = `Diferença: <strong style="color:${color};">${sign}${delta.toFixed(0)} g</strong>`;
+        });
+    }
+
+    const btnApplyAdjustment = document.getElementById('btn-apply-adjustment');
+    if (btnApplyAdjustment) {
+        btnApplyAdjustment.addEventListener('click', async () => {
+            const physicalGrams = parseFloat(adjustPhysicalInput?.value);
+            const reason = document.getElementById('adjust-reason')?.value.trim();
+            const msgEl = document.getElementById('adjust-msg');
+            msgEl.textContent = '';
+            if (isNaN(physicalGrams) || physicalGrams < 0) {
+                msgEl.style.color = '#f87171';
+                msgEl.textContent = 'Informe o estoque físico real.';
+                return;
+            }
+            const res = await authFetch(`${API_URL}/admin/stock/adjust`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ physical_grams: physicalGrams, reason })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                adjustPhysicalInput.value = '';
+                if (document.getElementById('adjust-reason')) document.getElementById('adjust-reason').value = '';
+                if (adjustPreview) adjustPreview.innerHTML = '';
+                msgEl.style.color = 'var(--success)';
+                const delta = data.delta_grams;
+                const sign = delta >= 0 ? '+' : '';
+                msgEl.textContent = `✓ Acerto registrado: ${sign}${delta.toFixed(0)} g`;
+                await loadAdjustments();
+                await loadSystemState();
+                setTimeout(() => { msgEl.textContent = ''; }, 3000);
+            } else {
+                msgEl.style.color = '#f87171';
+                msgEl.textContent = data.error || 'Erro ao registrar acerto.';
             }
         });
     }
