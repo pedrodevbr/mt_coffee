@@ -43,9 +43,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const pixKeyValue = document.getElementById('pix-key-value');
     const btnDownloadQr = document.getElementById('btn-download-qr');
     const downloadQrContainer = document.getElementById('download-qr-container');
-    const rechargeAmount = document.getElementById('recharge-amount');
-    const directRechargeMsg = document.getElementById('direct-recharge-msg');
-    const btnDirectRecharge = document.getElementById('btn-direct-recharge');
     const receiptFile = document.getElementById('receipt-file');
     const receiptUploadMsg = document.getElementById('receipt-upload-msg');
     const userReceiptsWrap = document.getElementById('user-receipts-wrap');
@@ -82,8 +79,6 @@ document.addEventListener('DOMContentLoaded', () => {
     btnConsume.addEventListener('click', handleConsume);
 
     btnShowRecharge.addEventListener('click', () => {
-        rechargeAmount.value = '';
-        directRechargeMsg.textContent = '';
         receiptFile.value = '';
         receiptUploadMsg.textContent = '';
         rechargeModal.classList.remove('hidden');
@@ -94,7 +89,6 @@ document.addEventListener('DOMContentLoaded', () => {
         rechargeModal.classList.add('hidden');
     });
 
-    btnDirectRecharge.addEventListener('click', handleDirectRecharge);
     btnConfirmRecharge.addEventListener('click', handleRecharge);
     btnShowHistory.addEventListener('click', handleToggleHistory);
 
@@ -276,43 +270,6 @@ document.addEventListener('DOMContentLoaded', () => {
             showActionMsg('Erro de conexão.', true);
             btnConsume.innerHTML = originalText;
             btnConsume.disabled = false;
-        }
-    }
-
-    async function handleDirectRecharge() {
-        const amount = parseFloat(rechargeAmount.value);
-        if (isNaN(amount) || amount <= 0) {
-            directRechargeMsg.style.color = 'var(--danger)';
-            directRechargeMsg.textContent = 'Informe um valor válido.';
-            return;
-        }
-        btnDirectRecharge.disabled = true;
-        btnDirectRecharge.textContent = 'Processando...';
-        directRechargeMsg.textContent = '';
-        try {
-            const res = await fetch(`${API_URL}/recharge`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ matricula: currentUser.matricula, amount })
-            });
-            const data = await res.json();
-            if (res.ok) {
-                rechargeAmount.value = '';
-                directRechargeMsg.style.color = 'var(--success)';
-                directRechargeMsg.textContent = `✓ Saldo de R$ ${amount.toFixed(2)} adicionado!`;
-                currentUser.balance = data.balance;
-                userBalanceEl.textContent = `R$ ${data.balance.toFixed(2)}`;
-                setTimeout(() => { rechargeModal.classList.add('hidden'); }, 1200);
-            } else {
-                directRechargeMsg.style.color = 'var(--danger)';
-                directRechargeMsg.textContent = data.error || 'Erro ao recarregar.';
-            }
-        } catch (error) {
-            directRechargeMsg.style.color = 'var(--danger)';
-            directRechargeMsg.textContent = 'Erro de conexão.';
-        } finally {
-            btnDirectRecharge.disabled = false;
-            btnDirectRecharge.textContent = 'Confirmar Recarga';
         }
     }
 
