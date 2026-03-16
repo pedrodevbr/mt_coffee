@@ -198,14 +198,14 @@ async function recalculateStockState(client) {
     const consResult = await client.query("SELECT COUNT(*) AS cnt FROM transactions WHERE type='consumption'");
     const consumedGrams = parseInt(consResult.rows[0].cnt) * doseGrams;
     const adjResult = await client.query(
-        'SELECT COALESCE(SUM(delta_grams),0) AS dg, COALESCE(SUM(delta_cost),0) AS dc FROM stock_adjustments'
+        'SELECT COALESCE(SUM(delta_grams),0) AS dg FROM stock_adjustments'
     );
     const adjGrams = parseFloat(adjResult.rows[0].dg);
-    const adjCost  = parseFloat(adjResult.rows[0].dc);
+    // Cost is never adjusted — all purchase cost remains as sunk cost,
+    // so losses increase price per dose and gains decrease it.
     const currentStock = Math.max(0, totalGrams - consumedGrams + adjGrams);
-    const currentCost  = Math.max(0, totalCost + adjCost);
-    await client.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [currentStock, currentCost]);
-    return { currentStock, totalCost: currentCost };
+    await client.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [currentStock, totalCost]);
+    return { currentStock, totalCost };
 }
 
 app.put('/api/admin/stock-history/:id', requireAdmin, async (req, res) => {
@@ -272,15 +272,16 @@ app.post('/api/admin/stock/adjust', requireAdmin, async (req, res) => {
             return res.status(400).json({ error: 'Estoque físico igual ao virtual. Nenhum ajuste necessário.' });
         }
         const deltaGrams = physicalGrams - currentGrams;
-        const costPerGram = currentGrams > 0 ? currentCost / currentGrams : 0;
-        const deltaCost   = deltaGrams * costPerGram;
+        // delta_cost is always 0: the purchase cost was already spent (sunk cost).
+        // A loss means fewer grams carry the same total cost → higher price per dose.
+        // A gain means more grams carry the same total cost → lower price per dose.
         await client.query(
             'INSERT INTO stock_adjustments (grams_before, grams_after, delta_grams, delta_cost, reason) VALUES ($1,$2,$3,$4,$5)',
-            [currentGrams, physicalGrams, deltaGrams, deltaCost, reason || null]
+            [currentGrams, physicalGrams, deltaGrams, 0, reason || null]
         );
         await client.query(
-            'UPDATE system_state SET coffee_stock_grams=$1, stock_total_cost=$2',
-            [Math.max(0, physicalGrams), Math.max(0, currentCost + deltaCost)]
+            'UPDATE system_state SET coffee_stock_grams=$1',
+            [Math.max(0, physicalGrams)]
         );
         await client.query('COMMIT');
         res.json({ success: true, grams_before: currentGrams, grams_after: physicalGrams, delta_grams: deltaGrams });
