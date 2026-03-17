@@ -759,6 +759,15 @@
                 <div style="margin-bottom:6px;"><span style="color:var(--text-muted);">Usuário: </span><strong id="approve-user-name">--</strong></div>
                 <div><span style="color:var(--text-muted);">Arquivo: </span><a id="approve-view-file" href="#" target="_blank" style="color:#60a5fa; font-size:0.85rem;">Ver comprovante ↗</a></div>
             </div>
+            <div id="llm-analysis-section" style="margin:10px 0 14px; background:rgba(99,102,241,0.08); border-radius:8px; padding:12px; font-size:0.85rem; border-left:3px solid #6366f1; display:none;">
+                <div style="font-weight:600; color:#a5b4fc; margin-bottom:6px;">🤖 Análise por IA</div>
+                <div id="llm-decision-badge" style="margin-bottom:5px;"></div>
+                <div id="llm-reasoning" style="color:#cbd5e1; line-height:1.4;"></div>
+                <div style="margin-top:8px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                    <span id="llm-meta" style="font-size:0.72rem; color:#475569;"></span>
+                    <button id="btn-reanalyze" style="background:none; border:1px solid #6366f1; color:#a5b4fc; border-radius:5px; padding:2px 9px; font-size:0.75rem; cursor:pointer;">↺ Reanalisar</button>
+                </div>
+            </div>
             <div class="input-group small">
                 <input type="number" id="approve-amount-input" step="0.01" min="0.01" placeholder=" ">
                 <label for="approve-amount-input">Valor a Creditar (R$)</label>

@@ -2,7 +2,7 @@ const { Pool } = require('pg');
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: false
+    ssl: { rejectUnauthorized: false }
 });
 
 async function initSchema() {
@@ -56,6 +56,18 @@ async function initSchema() {
         await client.query(`
             ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS price_per_dose REAL DEFAULT 0
         `);
+        await client.query(`
+            ALTER TABLE payment_receipts ADD COLUMN IF NOT EXISTS llm_analysis TEXT
+        `);
+
+        await client.query(`ALTER TABLE payment_receipts ADD COLUMN IF NOT EXISTS file_data BYTEA`);
+        await client.query(`ALTER TABLE payment_receipts ADD COLUMN IF NOT EXISTS file_hash TEXT`);
+        await client.query(`ALTER TABLE payment_receipts ADD COLUMN IF NOT EXISTS transaction_id TEXT`);
+
+        const cpfCount = await client.query("SELECT COUNT(*) AS count FROM settings WHERE key = 'recipient_cpf'");
+        if (parseInt(cpfCount.rows[0].count) === 0) {
+            await client.query("INSERT INTO settings (key, value) VALUES ('recipient_cpf', '03937198121')");
+        }
 
         await client.query(`
             CREATE TABLE IF NOT EXISTS stock_adjustments (

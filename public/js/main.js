@@ -281,24 +281,60 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         btnConfirmRecharge.disabled = true;
-        btnConfirmRecharge.textContent = 'Enviando...';
+        btnConfirmRecharge.textContent = 'Validando...';
         receiptUploadMsg.textContent = '';
+
+        const validationDiv = document.getElementById('validation-result');
+        validationDiv.style.display = 'block';
+        validationDiv.innerHTML = '<span style="color:#94a3b8;">⏳ Validando comprovante com IA...</span>';
+
         try {
             const formData = new FormData();
             formData.append('matricula', currentUser.matricula);
             formData.append('comprovante', file);
             const res = await fetch(`${API_URL}/receipts`, { method: 'POST', body: formData });
             const data = await res.json();
-            if (res.ok) {
-                receiptFile.value = '';
-                receiptUploadMsg.style.color = 'var(--success)';
-                receiptUploadMsg.textContent = '✓ Comprovante enviado! Aguardando aprovação.';
-                loadUserReceipts();
-            } else {
+            const v = data.validation;
+
+            if (res.status === 409) {
+                validationDiv.innerHTML = `<div style="color:#f59e0b; font-weight:600;">⚠ Comprovante duplicado</div><div style="color:#cbd5e1; margin-top:4px;">${data.error}</div>`;
+                return;
+            }
+
+            if (!res.ok) {
+                validationDiv.style.display = 'none';
                 receiptUploadMsg.style.color = 'var(--danger)';
                 receiptUploadMsg.textContent = data.error || 'Erro ao enviar comprovante.';
+                return;
             }
+
+            receiptFile.value = '';
+
+            if (v) {
+                const rejected = data.status === 'auto_rejected';
+                const color = rejected ? 'var(--danger)' : (v.decision === 'uncertain' ? '#f59e0b' : 'var(--success)');
+                const icon = rejected ? '✗' : (v.decision === 'uncertain' ? '⚠' : '✓');
+                const title = rejected ? 'Comprovante rejeitado' : 'Comprovante recebido';
+
+                const pixBadge = v.is_pix != null ? `<span style="margin-right:8px; color:${v.is_pix ? '#4ade80' : '#f87171'}">${v.is_pix ? '✓ PIX' : '✗ Não é PIX'}</span>` : '';
+                const cpfBadge = v.cpf_match != null ? `<span style="margin-right:8px; color:${v.cpf_match ? '#4ade80' : '#f87171'}">${v.cpf_match ? '✓ CPF correto' : '✗ CPF incorreto'}</span>` : '';
+                const amtBadge = v.suggested_amount ? `<span style="color:#94a3b8;">R$ ${parseFloat(v.suggested_amount).toFixed(2).replace('.', ',')}</span>` : '';
+
+                validationDiv.innerHTML = `
+                    <div style="color:${color}; font-weight:600; margin-bottom:5px;">${icon} ${title}</div>
+                    <div style="font-size:0.8rem; margin-bottom:4px;">${pixBadge}${cpfBadge}${amtBadge}</div>
+                    ${v.reasoning ? `<div style="font-size:0.8rem; color:#94a3b8;">${v.reasoning}</div>` : ''}
+                    ${!rejected ? '<div style="font-size:0.78rem; color:#64748b; margin-top:4px;">Aguardando aprovação do administrador.</div>' : ''}
+                `;
+            } else {
+                validationDiv.style.display = 'none';
+                receiptUploadMsg.style.color = 'var(--success)';
+                receiptUploadMsg.textContent = '✓ Comprovante enviado! Aguardando aprovação.';
+            }
+
+            loadUserReceipts();
         } catch (error) {
+            validationDiv.style.display = 'none';
             receiptUploadMsg.style.color = 'var(--danger)';
             receiptUploadMsg.textContent = 'Erro de conexão.';
         } finally {
@@ -318,7 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             userReceiptsWrap.style.display = 'block';
-            const statusMap = { pending: ['⏳ Pendente', '#f59e0b'], approved: ['✓ Aprovado', 'var(--success)'], rejected: ['✗ Rejeitado', 'var(--danger)'] };
+            const statusMap = { pending: ['⏳ Pendente', '#f59e0b'], approved: ['✓ Aprovado', 'var(--success)'], rejected: ['✗ Rejeitado', 'var(--danger)'], auto_rejected: ['✗ Não aprovado', 'var(--danger)'] };
             userReceiptsList.innerHTML = receipts.map(r => {
                 const [label, color] = statusMap[r.status] || ['--', '#fff'];
                 const date = new Date(r.created_at).toLocaleDateString('pt-BR');

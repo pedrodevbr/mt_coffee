@@ -1,8 +1,12 @@
+const NODE_ENV = process.env.NODE_ENV || 'development';
+require('dotenv').config({ path: `.env.${NODE_ENV}` });
+require('dotenv').config(); // fallback to .env (won't override already-set vars)
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { pool, initSchema } = require('./database');
 
@@ -10,6 +14,8 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'mt_coffee_fallback_secret';
 const TOKEN_EXPIRY = '12h';
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+const LLM_MODEL = 'google/gemini-3.1-pro-preview';
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -20,15 +26,8 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 const receiptsDir = path.join(__dirname, 'uploads', 'receipts');
 if (!fs.existsSync(receiptsDir)) fs.mkdirSync(receiptsDir, { recursive: true });
 
-const receiptStorage = multer.diskStorage({
-    destination: (req, file, cb) => cb(null, receiptsDir),
-    filename: (req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
-        cb(null, `receipt_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
-    }
-});
 const uploadReceipt = multer({
-    storage: receiptStorage,
+    storage: multer.memoryStorage(),
     limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
         const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
@@ -36,6 +35,62 @@ const uploadReceipt = multer({
         else cb(new Error('Tipo de arquivo não permitido. Use imagem ou PDF.'));
     }
 });
+
+// =====================
+//  LLM RECEIPT ANALYSIS
+// =====================
+async function analyzeReceiptWithLLM(fileBuffer, mimeType, recipientCpf) {
+    if (!OPENROUTER_API_KEY) return null;
+    try {
+        const base64 = fileBuffer.toString('base64');
+        const dataUrl = `data:${mimeType};base64,${base64}`;
+        const prompt = `Você é um sistema de verificação de comprovantes PIX brasileiros.
+Analise este comprovante e responda APENAS com JSON válido (sem markdown):
+{
+  "is_pix": true ou false,
+  "recipient_cpf": CPF do destinatário encontrado no comprovante (apenas dígitos, ex: "03937198121") ou null,
+  "cpf_match": true se o destinatário for exatamente o CPF ${recipientCpf}, false caso contrário,
+  "transaction_id": E2E ID ou código da transação se visível (string) ou null,
+  "suggested_amount": valor numérico em reais (ex: 50.00) ou null se não identificado,
+  "decision": "approve" se PIX válido e CPF correto, "reject" se CPF errado ou não é PIX, "uncertain" se tiver dúvida,
+  "reasoning": "explicação breve em português, máximo 2 frases"
+}`;
+
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+                'Content-Type': 'application/json',
+                'HTTP-Referer': 'https://mt-coffee.app',
+                'X-Title': 'MT Coffee'
+            },
+            body: JSON.stringify({
+                model: LLM_MODEL,
+                messages: [{
+                    role: 'user',
+                    content: [
+                        { type: 'image_url', image_url: { url: dataUrl } },
+                        { type: 'text', text: prompt }
+                    ]
+                }],
+                response_format: { type: 'json_object' },
+                max_tokens: 400
+            })
+        });
+
+        if (!response.ok) {
+            console.error('OpenRouter error:', await response.text());
+            return null;
+        }
+        const result = await response.json();
+        const content = result.choices?.[0]?.message?.content;
+        if (!content) return null;
+        return { ...JSON.parse(content), model: LLM_MODEL, analyzed_at: new Date().toISOString() };
+    } catch (err) {
+        console.error('LLM analysis error:', err.message);
+        return null;
+    }
+}
 
 // =====================
 //  AUTH MIDDLEWARE
@@ -651,26 +706,69 @@ app.delete('/api/admin/transactions/:id', requireAdmin, async (req, res) => {
 
 app.post('/api/receipts', uploadReceipt.single('comprovante'), async (req, res) => {
     try {
-        const { matricula, amount_declared } = req.body;
+        const { matricula } = req.body;
         if (!matricula || !req.file) {
-            if (req.file) fs.unlinkSync(req.file.path);
             return res.status(400).json({ error: 'Matrícula e comprovante são obrigatórios.' });
         }
-        const amount = amount_declared ? parseFloat(amount_declared) : 0;
+
+        const fileBuffer = req.file.buffer;
+        const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+
+        // Duplicate check by file hash
+        const dupHash = await pool.query('SELECT id FROM payment_receipts WHERE file_hash = $1', [fileHash]);
+        if (dupHash.rows.length > 0) {
+            return res.status(409).json({ error: 'Este comprovante já foi enviado anteriormente.', duplicate: true });
+        }
+
         const userResult = await pool.query('SELECT id FROM users WHERE matricula=$1', [matricula]);
         if (userResult.rows.length === 0) {
-            fs.unlinkSync(req.file.path);
             return res.status(404).json({ error: 'Usuário não encontrado.' });
         }
         const userId = userResult.rows[0].id;
+
+        // Get recipient CPF from settings
+        const cpfResult = await pool.query("SELECT value FROM settings WHERE key = 'recipient_cpf'");
+        const recipientCpf = cpfResult.rows.length ? cpfResult.rows[0].value : '03937198121';
+
+        // Run LLM analysis synchronously
+        const analysis = await analyzeReceiptWithLLM(fileBuffer, req.file.mimetype, recipientCpf);
+
+        // Duplicate check by transaction ID extracted by LLM
+        if (analysis?.transaction_id) {
+            const dupTx = await pool.query('SELECT id FROM payment_receipts WHERE transaction_id = $1', [analysis.transaction_id]);
+            if (dupTx.rows.length > 0) {
+                return res.status(409).json({
+                    error: 'Esta transação PIX já foi submetida anteriormente.',
+                    duplicate: true,
+                    validation: analysis
+                });
+            }
+        }
+
+        const status = analysis?.decision === 'reject' ? 'auto_rejected' : 'pending';
+        const amount = analysis?.suggested_amount || 0;
+        const autoNotes = status === 'auto_rejected' ? (analysis?.reasoning || 'Rejeitado automaticamente pela IA') : null;
+
         await pool.query(
-            `INSERT INTO payment_receipts (user_id, amount_declared, file_path, file_name, file_type)
-             VALUES ($1, $2, $3, $4, $5)`,
-            [userId, amount, req.file.filename, req.file.originalname, req.file.mimetype]
+            `INSERT INTO payment_receipts
+             (user_id, amount_declared, file_path, file_name, file_type, file_data, file_hash, transaction_id, llm_analysis, status, notes)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+            [userId, amount, '', req.file.originalname, req.file.mimetype,
+             fileBuffer, fileHash,
+             analysis?.transaction_id || null,
+             analysis ? JSON.stringify(analysis) : null,
+             status, autoNotes]
         );
-        res.json({ success: true, message: 'Comprovante enviado! Aguardando aprovação do administrador.' });
+
+        res.json({
+            success: status !== 'auto_rejected',
+            status,
+            message: status === 'auto_rejected'
+                ? 'Comprovante não aprovado pela validação automática.'
+                : 'Comprovante enviado! Aguardando aprovação do administrador.',
+            validation: analysis
+        });
     } catch (err) {
-        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
         res.status(500).json({ error: err.message });
     }
 });
@@ -694,18 +792,19 @@ app.get('/api/receipts/:matricula/:id/file', async (req, res) => {
     try {
         const { matricula, id } = req.params;
         const result = await pool.query(
-            `SELECT pr.file_path, pr.file_name, pr.file_type
+            `SELECT pr.file_data, pr.file_path, pr.file_name, pr.file_type
              FROM payment_receipts pr
              JOIN users u ON pr.user_id = u.id
              WHERE pr.id = $1 AND u.matricula = $2`,
             [id, matricula]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Arquivo não encontrado.' });
-        const { file_path, file_name, file_type } = result.rows[0];
-        const fullPath = path.join(receiptsDir, file_path);
-        if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Arquivo não encontrado no servidor.' });
+        const { file_data, file_path, file_name, file_type } = result.rows[0];
         res.setHeader('Content-Type', file_type);
         res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file_name)}"`);
+        if (file_data) return res.send(file_data);
+        const fullPath = path.join(receiptsDir, file_path);
+        if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Arquivo não encontrado no servidor.' });
         fs.createReadStream(fullPath).pipe(res);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -728,13 +827,14 @@ app.get('/api/admin/receipts', requireAdmin, async (req, res) => {
 
 app.get('/api/admin/receipts/:id/file', requireAdmin, async (req, res) => {
     try {
-        const result = await pool.query('SELECT file_path, file_name, file_type FROM payment_receipts WHERE id=$1', [req.params.id]);
+        const result = await pool.query('SELECT file_data, file_path, file_name, file_type FROM payment_receipts WHERE id=$1', [req.params.id]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Comprovante não encontrado.' });
-        const { file_path, file_name, file_type } = result.rows[0];
-        const fullPath = path.join(receiptsDir, file_path);
-        if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Arquivo não encontrado no servidor.' });
+        const { file_data, file_path, file_name, file_type } = result.rows[0];
         res.setHeader('Content-Type', file_type);
         res.setHeader('Content-Disposition', `inline; filename="${file_name}"`);
+        if (file_data) return res.send(file_data);
+        const fullPath = path.join(receiptsDir, file_path);
+        if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Arquivo não encontrado no servidor.' });
         fs.createReadStream(fullPath).pipe(res);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -785,6 +885,31 @@ app.put('/api/admin/receipts/:id/reject', requireAdmin, async (req, res) => {
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Comprovante não encontrado ou já processado.' });
         res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/admin/receipts/:id/reanalyze', requireAdmin, async (req, res) => {
+    try {
+        const receipt = await pool.query('SELECT * FROM payment_receipts WHERE id=$1', [req.params.id]);
+        if (receipt.rows.length === 0) return res.status(404).json({ error: 'Comprovante não encontrado.' });
+        const { file_data, file_path, file_type } = receipt.rows[0];
+
+        let fileBuffer = file_data;
+        if (!fileBuffer) {
+            const fullPath = path.join(receiptsDir, file_path);
+            if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Arquivo não encontrado.' });
+            fileBuffer = fs.readFileSync(fullPath);
+        }
+
+        const cpfResult = await pool.query("SELECT value FROM settings WHERE key = 'recipient_cpf'");
+        const recipientCpf = cpfResult.rows.length ? cpfResult.rows[0].value : '03937198121';
+
+        const analysis = await analyzeReceiptWithLLM(fileBuffer, file_type, recipientCpf);
+        if (!analysis) return res.status(502).json({ error: 'Falha na análise por IA. Verifique a chave OPENROUTER_API_KEY.' });
+        await pool.query('UPDATE payment_receipts SET llm_analysis=$1 WHERE id=$2', [JSON.stringify(analysis), req.params.id]);
+        res.json({ success: true, analysis });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -939,11 +1064,35 @@ app.use((req, res) => {
     }
 });
 
-initSchema().then(() => {
-    app.listen(PORT, () => {
-        console.log(`Server running on http://localhost:${PORT}`);
+async function migrateFilesToDb() {
+    try {
+        const rows = await pool.query(
+            "SELECT id, file_path, file_type FROM payment_receipts WHERE file_data IS NULL AND file_path != ''"
+        );
+        for (const row of rows.rows) {
+            const fullPath = path.join(receiptsDir, row.file_path);
+            if (fs.existsSync(fullPath)) {
+                const data = fs.readFileSync(fullPath);
+                const hash = crypto.createHash('sha256').update(data).digest('hex');
+                await pool.query('UPDATE payment_receipts SET file_data=$1, file_hash=$2 WHERE id=$3', [data, hash, row.id]);
+                console.log(`Migrated receipt ${row.id} to database.`);
+            }
+        }
+    } catch (err) {
+        console.error('Receipt migration warning:', err.message);
+    }
+}
+
+module.exports = app;
+
+if (require.main === module) {
+    initSchema().then(async () => {
+        await migrateFilesToDb();
+        app.listen(PORT, () => {
+            console.log(`[${NODE_ENV}] Server running on http://localhost:${PORT}`);
+        });
+    }).catch(err => {
+        console.error('Failed to initialize database:', err);
+        process.exit(1);
     });
-}).catch(err => {
-    console.error('Failed to initialize database:', err);
-    process.exit(1);
-});
+}
