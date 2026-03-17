@@ -730,44 +730,44 @@ app.post('/api/receipts', uploadReceipt.single('comprovante'), async (req, res) 
         const cpfResult = await pool.query("SELECT value FROM settings WHERE key = 'recipient_cpf'");
         const recipientCpf = cpfResult.rows.length ? cpfResult.rows[0].value : '03937198121';
 
-        // Run LLM analysis synchronously
-        const analysis = await analyzeReceiptWithLLM(fileBuffer, req.file.mimetype, recipientCpf);
-
-        // Duplicate check by transaction ID extracted by LLM
-        if (analysis?.transaction_id) {
-            const dupTx = await pool.query('SELECT id FROM payment_receipts WHERE transaction_id = $1', [analysis.transaction_id]);
-            if (dupTx.rows.length > 0) {
-                return res.status(409).json({
-                    error: 'Esta transação PIX já foi submetida anteriormente.',
-                    duplicate: true,
-                    validation: analysis
-                });
-            }
-        }
-
-        const status = analysis?.decision === 'reject' ? 'auto_rejected' : 'pending';
-        const amount = analysis?.suggested_amount || 0;
-        const autoNotes = status === 'auto_rejected' ? (analysis?.reasoning || 'Rejeitado automaticamente pela IA') : null;
-
-        await pool.query(
+        // Save immediately — LLM runs in background after response
+        const insertResult = await pool.query(
             `INSERT INTO payment_receipts
-             (user_id, amount_declared, file_path, file_name, file_type, file_data, file_hash, transaction_id, llm_analysis, status, notes)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-            [userId, amount, '', req.file.originalname, req.file.mimetype,
-             fileBuffer, fileHash,
-             analysis?.transaction_id || null,
-             analysis ? JSON.stringify(analysis) : null,
-             status, autoNotes]
+             (user_id, amount_declared, file_path, file_name, file_type, file_data, file_hash, status)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') RETURNING id`,
+            [userId, 0, '', req.file.originalname, req.file.mimetype, fileBuffer, fileHash]
         );
+        const receiptId = insertResult.rows[0].id;
 
-        res.json({
-            success: status !== 'auto_rejected',
-            status,
-            message: status === 'auto_rejected'
-                ? 'Comprovante não aprovado pela validação automática.'
-                : 'Comprovante enviado! Aguardando aprovação do administrador.',
-            validation: analysis
-        });
+        res.json({ success: true, receipt_id: receiptId, message: 'Comprovante recebido. Validando...' });
+
+        // Run LLM analysis in background
+        (async () => {
+            const analysis = await analyzeReceiptWithLLM(fileBuffer, req.file.mimetype, recipientCpf);
+            if (!analysis) return;
+
+            // Duplicate check by transaction ID
+            let finalStatus = analysis.decision === 'reject' ? 'auto_rejected' : 'pending';
+            let finalNotes = finalStatus === 'auto_rejected' ? (analysis.reasoning || 'Rejeitado automaticamente pela IA') : null;
+            if (analysis.transaction_id) {
+                const dupTx = await pool.query(
+                    'SELECT id FROM payment_receipts WHERE transaction_id=$1 AND id!=$2',
+                    [analysis.transaction_id, receiptId]
+                );
+                if (dupTx.rows.length > 0) {
+                    finalStatus = 'auto_rejected';
+                    finalNotes = 'Esta transação PIX já foi submetida anteriormente.';
+                }
+            }
+
+            await pool.query(
+                `UPDATE payment_receipts
+                 SET llm_analysis=$1, transaction_id=$2, amount_declared=$3, status=$4, notes=$5
+                 WHERE id=$6`,
+                [JSON.stringify(analysis), analysis.transaction_id || null,
+                 analysis.suggested_amount || 0, finalStatus, finalNotes, receiptId]
+            );
+        })();
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -783,6 +783,28 @@ app.get('/api/receipts/:matricula', async (req, res) => {
             [userResult.rows[0].id]
         );
         res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/receipts/:matricula/:id/analysis', async (req, res) => {
+    try {
+        const { matricula, id } = req.params;
+        const result = await pool.query(
+            `SELECT pr.llm_analysis, pr.status, pr.notes
+             FROM payment_receipts pr
+             JOIN users u ON pr.user_id = u.id
+             WHERE pr.id=$1 AND u.matricula=$2`,
+            [id, matricula]
+        );
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Não encontrado.' });
+        const row = result.rows[0];
+        let analysis = null;
+        if (row.llm_analysis) {
+            try { analysis = JSON.parse(row.llm_analysis); } catch {}
+        }
+        res.json({ analysis, status: row.status, notes: row.notes });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
