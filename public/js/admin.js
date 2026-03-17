@@ -802,7 +802,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderReceipts(filter) {
         currentReceiptFilter = filter;
         const filtered = filter === 'all' ? allReceipts
-            : filter === 'rejected' ? allReceipts.filter(r => r.status === 'rejected' || r.status === 'auto_rejected')
+            : filter === 'rejected' ? allReceipts.filter(r => r.status === 'rejected' || r.status === 'auto_rejected') // auto_rejected kept for legacy rows
             : allReceipts.filter(r => r.status === filter);
         if (filtered.length === 0) {
             receiptsTbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">Nenhum comprovante ${filter === 'pending' ? 'pendente' : filter === 'approved' ? 'aprovado' : filter === 'rejected' ? 'rejeitado' : ''}.</td></tr>`;
@@ -812,7 +812,7 @@ document.addEventListener('DOMContentLoaded', () => {
             pending: ['⏳ Pendente', '#f59e0b'],
             approved: ['✓ Aprovado', '#4ade80'],
             rejected: ['✗ Rejeitado', '#f87171'],
-            auto_rejected: ['🤖 Rejeitado (IA)', '#f87171']
+            auto_rejected: ['✗ Rejeitado', '#f87171']
         };
         receiptsTbody.innerHTML = filtered.map(r => {
             const [statusLabel, statusColor] = statusStyles[r.status] || ['--', '#fff'];
@@ -841,87 +841,14 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.addEventListener('click', () => renderReceipts(btn.dataset.filter));
     });
 
-    function renderLlmAnalysis(analysis) {
-        const section = document.getElementById('llm-analysis-section');
-        const badge = document.getElementById('llm-decision-badge');
-        const reasoning = document.getElementById('llm-reasoning');
-        const meta = document.getElementById('llm-meta');
-        section.style.display = 'block';
-
-        if (!analysis) {
-            badge.innerHTML = '<span style="color:#64748b;">⏳ Análise em andamento...</span>';
-            reasoning.textContent = '';
-            meta.textContent = '';
-            approveAmountInput.value = '';
-            return;
-        }
-
-        const decisionColors = { approve: '#4ade80', reject: '#f87171', uncertain: '#f59e0b' };
-        const decisionLabels = { approve: '✓ Recomenda aprovar', reject: '✗ Recomenda rejeitar', uncertain: '⚠ Incerto' };
-        const color = decisionColors[analysis.decision] || '#fff';
-        const label = decisionLabels[analysis.decision] || analysis.decision;
-
-        let badgeHtml = `<span style="color:${color}; font-weight:600;">${label}</span>`;
-        if (analysis.suggested_amount != null) {
-            const fmt = parseFloat(analysis.suggested_amount).toFixed(2).replace('.', ',');
-            badgeHtml += ` <span style="color:#94a3b8;">— Valor sugerido: <strong>R$ ${fmt}</strong></span>`;
-            approveAmountInput.value = parseFloat(analysis.suggested_amount).toFixed(2);
-        }
-        badge.innerHTML = badgeHtml;
-
-        let detailsHtml = '';
-        if (analysis.cpf_match != null) detailsHtml += `<span style="color:${analysis.cpf_match ? '#4ade80' : '#f87171'}; margin-right:10px;">${analysis.cpf_match ? '✓ CPF correto' : '✗ CPF incorreto'}</span>`;
-        if (analysis.recipient_cpf) detailsHtml += `<span style="color:#64748b; margin-right:10px; font-size:0.75rem;">${analysis.recipient_cpf}</span>`;
-        if (analysis.transaction_id) detailsHtml += `<span style="color:#64748b; font-size:0.75rem;">ID: ${analysis.transaction_id}</span>`;
-        if (detailsHtml) badge.innerHTML += `<div style="margin-top:4px; font-size:0.8rem;">${detailsHtml}</div>`;
-
-        reasoning.textContent = analysis.reasoning || '';
-        const date = analysis.analyzed_at ? new Date(analysis.analyzed_at).toLocaleString('pt-BR') : '';
-        meta.textContent = `${analysis.model || ''} • ${date}`;
-    }
-
     function openApproveModal(id, userName) {
-        const receipt = allReceipts.find(r => String(r.id) === String(id));
         approveReceiptId.value = id;
         approveUserName.textContent = userName;
         approveAmountInput.value = '';
         approveMsg.textContent = '';
         approveViewFile.href = `/api/admin/receipts/${id}/file?token=${getToken()}`;
-
-        let analysis = null;
-        if (receipt?.llm_analysis) {
-            try { analysis = typeof receipt.llm_analysis === 'string' ? JSON.parse(receipt.llm_analysis) : receipt.llm_analysis; } catch {}
-        }
-        renderLlmAnalysis(analysis);
-
         approveReceiptModal.classList.remove('hidden');
     }
-
-    document.getElementById('btn-reanalyze').addEventListener('click', async () => {
-        const id = approveReceiptId.value;
-        const btn = document.getElementById('btn-reanalyze');
-        btn.disabled = true;
-        btn.textContent = 'Analisando...';
-        document.getElementById('llm-decision-badge').innerHTML = '<span style="color:#64748b;">⏳ Consultando IA...</span>';
-        document.getElementById('llm-reasoning').textContent = '';
-        document.getElementById('llm-meta').textContent = '';
-        try {
-            const res = await authFetch(`${API_URL}/admin/receipts/${id}/reanalyze`, { method: 'POST', headers: authHeaders() });
-            const data = await res.json();
-            if (res.ok) {
-                renderLlmAnalysis(data.analysis);
-                const receipt = allReceipts.find(r => String(r.id) === String(id));
-                if (receipt) receipt.llm_analysis = data.analysis;
-            } else {
-                document.getElementById('llm-decision-badge').innerHTML = `<span style="color:#f87171;">Erro: ${data.error}</span>`;
-            }
-        } catch {
-            document.getElementById('llm-decision-badge').innerHTML = '<span style="color:#f87171;">Erro de conexão.</span>';
-        } finally {
-            btn.disabled = false;
-            btn.textContent = '↺ Reanalisar';
-        }
-    });
 
     closeApproveModal.addEventListener('click', () => approveReceiptModal.classList.add('hidden'));
     approveReceiptModal.addEventListener('click', e => { if (e.target === approveReceiptModal) approveReceiptModal.classList.add('hidden'); });

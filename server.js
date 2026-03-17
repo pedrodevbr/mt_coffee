@@ -14,8 +14,6 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET || 'mt_coffee_fallback_secret';
 const TOKEN_EXPIRY = '12h';
-const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-const LLM_MODEL = 'google/gemini-3.1-pro-preview';
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
@@ -35,62 +33,6 @@ const uploadReceipt = multer({
         else cb(new Error('Tipo de arquivo não permitido. Use imagem ou PDF.'));
     }
 });
-
-// =====================
-//  LLM RECEIPT ANALYSIS
-// =====================
-async function analyzeReceiptWithLLM(fileBuffer, mimeType, recipientCpf) {
-    if (!OPENROUTER_API_KEY) return null;
-    try {
-        const base64 = fileBuffer.toString('base64');
-        const dataUrl = `data:${mimeType};base64,${base64}`;
-        const prompt = `Você é um sistema de verificação de comprovantes PIX brasileiros.
-Analise este comprovante e responda APENAS com JSON válido (sem markdown):
-{
-  "is_pix": true ou false,
-  "recipient_cpf": CPF do destinatário encontrado no comprovante (apenas dígitos, ex: "03937198121") ou null,
-  "cpf_match": true se o destinatário for exatamente o CPF ${recipientCpf}, false caso contrário,
-  "transaction_id": E2E ID ou código da transação se visível (string) ou null,
-  "suggested_amount": valor numérico em reais (ex: 50.00) ou null se não identificado,
-  "decision": "approve" se PIX válido e CPF correto, "reject" se CPF errado ou não é PIX, "uncertain" se tiver dúvida,
-  "reasoning": "explicação breve em português, máximo 2 frases"
-}`;
-
-        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-                'Content-Type': 'application/json',
-                'HTTP-Referer': 'https://mt-coffee.app',
-                'X-Title': 'MT Coffee'
-            },
-            body: JSON.stringify({
-                model: LLM_MODEL,
-                messages: [{
-                    role: 'user',
-                    content: [
-                        { type: 'image_url', image_url: { url: dataUrl } },
-                        { type: 'text', text: prompt }
-                    ]
-                }],
-                response_format: { type: 'json_object' },
-                max_tokens: 400
-            })
-        });
-
-        if (!response.ok) {
-            console.error('OpenRouter error:', await response.text());
-            return null;
-        }
-        const result = await response.json();
-        const content = result.choices?.[0]?.message?.content;
-        if (!content) return null;
-        return { ...JSON.parse(content), model: LLM_MODEL, analyzed_at: new Date().toISOString() };
-    } catch (err) {
-        console.error('LLM analysis error:', err.message);
-        return null;
-    }
-}
 
 // =====================
 //  AUTH MIDDLEWARE
@@ -726,48 +668,16 @@ app.post('/api/receipts', uploadReceipt.single('comprovante'), async (req, res) 
         }
         const userId = userResult.rows[0].id;
 
-        // Get recipient CPF from settings
-        const cpfResult = await pool.query("SELECT value FROM settings WHERE key = 'recipient_cpf'");
-        const recipientCpf = cpfResult.rows.length ? cpfResult.rows[0].value : '03937198121';
+        const amount = req.body.amount_declared ? parseFloat(req.body.amount_declared) : 0;
 
-        // Save immediately — LLM runs in background after response
-        const insertResult = await pool.query(
+        await pool.query(
             `INSERT INTO payment_receipts
-             (user_id, amount_declared, file_path, file_name, file_type, file_data, file_hash, status)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,'pending') RETURNING id`,
-            [userId, 0, '', req.file.originalname, req.file.mimetype, fileBuffer, fileHash]
+             (user_id, amount_declared, file_path, file_name, file_type, file_data, file_hash)
+             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+            [userId, amount, '', req.file.originalname, req.file.mimetype, fileBuffer, fileHash]
         );
-        const receiptId = insertResult.rows[0].id;
 
-        res.json({ success: true, receipt_id: receiptId, message: 'Comprovante recebido. Validando...' });
-
-        // Run LLM analysis in background
-        (async () => {
-            const analysis = await analyzeReceiptWithLLM(fileBuffer, req.file.mimetype, recipientCpf);
-            if (!analysis) return;
-
-            // Duplicate check by transaction ID
-            let finalStatus = analysis.decision === 'reject' ? 'auto_rejected' : 'pending';
-            let finalNotes = finalStatus === 'auto_rejected' ? (analysis.reasoning || 'Rejeitado automaticamente pela IA') : null;
-            if (analysis.transaction_id) {
-                const dupTx = await pool.query(
-                    'SELECT id FROM payment_receipts WHERE transaction_id=$1 AND id!=$2',
-                    [analysis.transaction_id, receiptId]
-                );
-                if (dupTx.rows.length > 0) {
-                    finalStatus = 'auto_rejected';
-                    finalNotes = 'Esta transação PIX já foi submetida anteriormente.';
-                }
-            }
-
-            await pool.query(
-                `UPDATE payment_receipts
-                 SET llm_analysis=$1, transaction_id=$2, amount_declared=$3, status=$4, notes=$5
-                 WHERE id=$6`,
-                [JSON.stringify(analysis), analysis.transaction_id || null,
-                 analysis.suggested_amount || 0, finalStatus, finalNotes, receiptId]
-            );
-        })();
+        res.json({ success: true, message: 'Comprovante enviado! Aguardando aprovação do administrador.' });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -783,28 +693,6 @@ app.get('/api/receipts/:matricula', async (req, res) => {
             [userResult.rows[0].id]
         );
         res.json(result.rows);
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-app.get('/api/receipts/:matricula/:id/analysis', async (req, res) => {
-    try {
-        const { matricula, id } = req.params;
-        const result = await pool.query(
-            `SELECT pr.llm_analysis, pr.status, pr.notes
-             FROM payment_receipts pr
-             JOIN users u ON pr.user_id = u.id
-             WHERE pr.id=$1 AND u.matricula=$2`,
-            [id, matricula]
-        );
-        if (result.rows.length === 0) return res.status(404).json({ error: 'Não encontrado.' });
-        const row = result.rows[0];
-        let analysis = null;
-        if (row.llm_analysis) {
-            try { analysis = JSON.parse(row.llm_analysis); } catch {}
-        }
-        res.json({ analysis, status: row.status, notes: row.notes });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -912,30 +800,6 @@ app.put('/api/admin/receipts/:id/reject', requireAdmin, async (req, res) => {
     }
 });
 
-app.post('/api/admin/receipts/:id/reanalyze', requireAdmin, async (req, res) => {
-    try {
-        const receipt = await pool.query('SELECT * FROM payment_receipts WHERE id=$1', [req.params.id]);
-        if (receipt.rows.length === 0) return res.status(404).json({ error: 'Comprovante não encontrado.' });
-        const { file_data, file_path, file_type } = receipt.rows[0];
-
-        let fileBuffer = file_data;
-        if (!fileBuffer) {
-            const fullPath = path.join(receiptsDir, file_path);
-            if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Arquivo não encontrado.' });
-            fileBuffer = fs.readFileSync(fullPath);
-        }
-
-        const cpfResult = await pool.query("SELECT value FROM settings WHERE key = 'recipient_cpf'");
-        const recipientCpf = cpfResult.rows.length ? cpfResult.rows[0].value : '03937198121';
-
-        const analysis = await analyzeReceiptWithLLM(fileBuffer, file_type, recipientCpf);
-        if (!analysis) return res.status(502).json({ error: 'Falha na análise por IA. Verifique a chave OPENROUTER_API_KEY.' });
-        await pool.query('UPDATE payment_receipts SET llm_analysis=$1 WHERE id=$2', [JSON.stringify(analysis), req.params.id]);
-        res.json({ success: true, analysis });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
 
 app.get('/api/admin/stats/balance', requireAdmin, async (req, res) => {
     try {
