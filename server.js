@@ -801,6 +801,16 @@ app.put('/api/admin/receipts/:id/reject', requireAdmin, async (req, res) => {
 });
 
 
+app.delete('/api/admin/receipts/:id', requireAdmin, async (req, res) => {
+    try {
+        const result = await pool.query('DELETE FROM payment_receipts WHERE id=$1 RETURNING id', [req.params.id]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Comprovante não encontrado.' });
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.get('/api/admin/stats/balance', requireAdmin, async (req, res) => {
     try {
         const stockResult = await pool.query(`

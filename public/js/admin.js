@@ -905,6 +905,28 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch {}
     });
 
+    document.getElementById('btn-delete-receipt').addEventListener('click', async () => {
+        if (!confirm('Excluir este comprovante permanentemente?')) return;
+        const id = approveReceiptId.value;
+        try {
+            const res = await authFetch(`${API_URL}/admin/receipts/${id}`, {
+                method: 'DELETE',
+                headers: authHeaders()
+            });
+            if (res.ok) {
+                approveReceiptModal.classList.add('hidden');
+                loadReceipts();
+            } else {
+                const data = await res.json();
+                approveMsg.style.color = '#f87171';
+                approveMsg.textContent = data.error || 'Erro ao excluir.';
+            }
+        } catch {
+            approveMsg.style.color = '#f87171';
+            approveMsg.textContent = 'Erro de conexão.';
+        }
+    });
+
     async function handleSavePix() {
         const pix_key = pixKeyInput.value.trim();
         btnSavePix.disabled = true;
