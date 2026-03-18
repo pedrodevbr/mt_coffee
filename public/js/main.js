@@ -289,11 +289,6 @@ document.addEventListener('DOMContentLoaded', () => {
             formData.append('comprovante', file);
             const res = await fetch(`${API_URL}/receipts`, { method: 'POST', body: formData });
             const data = await res.json();
-            if (res.status === 409) {
-                receiptUploadMsg.style.color = 'var(--danger)';
-                receiptUploadMsg.textContent = data.error;
-                return;
-            }
             if (res.ok) {
                 receiptFile.value = '';
                 receiptUploadMsg.style.color = 'var(--success)';
@@ -323,7 +318,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             userReceiptsWrap.style.display = 'block';
-            const statusMap = { pending: ['⏳ Pendente', '#f59e0b'], approved: ['✓ Aprovado', 'var(--success)'], rejected: ['✗ Rejeitado', 'var(--danger)'], auto_rejected: ['✗ Não aprovado', 'var(--danger)'] };
+            const statusMap = { pending: ['⏳ Pendente', '#f59e0b'], approved: ['✓ Aprovado', 'var(--success)'], rejected: ['✗ Rejeitado', 'var(--danger)'] };
             userReceiptsList.innerHTML = receipts.map(r => {
                 const [label, color] = statusMap[r.status] || ['--', '#fff'];
                 const date = new Date(r.created_at).toLocaleDateString('pt-BR');

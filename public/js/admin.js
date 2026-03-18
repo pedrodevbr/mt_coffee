@@ -801,43 +801,34 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderReceipts(filter) {
         currentReceiptFilter = filter;
-        const filtered = filter === 'all' ? allReceipts
-            : filter === 'rejected' ? allReceipts.filter(r => r.status === 'rejected' || r.status === 'auto_rejected') // auto_rejected kept for legacy rows
-            : allReceipts.filter(r => r.status === filter);
+        const filtered = filter === 'all' ? allReceipts : allReceipts.filter(r => r.status === filter);
         if (filtered.length === 0) {
-            receiptsTbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">Nenhum comprovante ${filter === 'pending' ? 'pendente' : filter === 'approved' ? 'aprovado' : filter === 'rejected' ? 'rejeitado' : ''}.</td></tr>`;
+            receiptsTbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">Nenhum comprovante ${filter === 'pending' ? 'pendente' : filter === 'approved' ? 'aprovado' : filter === 'rejected' ? 'rejeitado' : ''}.</td></tr>`;
             return;
         }
         const statusStyles = {
             pending: ['⏳ Pendente', '#f59e0b'],
             approved: ['✓ Aprovado', '#4ade80'],
-            rejected: ['✗ Rejeitado', '#f87171'],
-            auto_rejected: ['✗ Rejeitado', '#f87171']
+            rejected: ['✗ Rejeitado', '#f87171']
         };
         receiptsTbody.innerHTML = filtered.map(r => {
             const [statusLabel, statusColor] = statusStyles[r.status] || ['--', '#fff'];
             const date = new Date(r.created_at).toLocaleDateString('pt-BR');
             const approvedAmt = r.amount_approved ? `<br><span style="font-size:0.78rem; color:#4ade80;">Aprovado: R$ ${parseFloat(r.amount_approved).toFixed(2).replace('.', ',')}</span>` : '';
             const noteCell = r.notes ? `<br><span style="font-size:0.78rem; color:#f87171;">${r.notes}</span>` : '';
-            const fileUrl = `/api/admin/receipts/${r.id}/file?token=${getToken()}`;
-            const viewLink = `<a href="${fileUrl}" target="_blank" style="color:#60a5fa; font-size:0.8rem; text-decoration:none;">Ver ↗</a>`;
-            const reviewLabel = r.status === 'pending' ? 'Revisar' : 'Ver detalhes';
-            const reviewColor = r.status === 'pending' ? '#f59e0b' : '#94a3b8';
-            const reviewBtn = `<button class="btn-review-receipt" data-id="${r.id}" data-user="${r.name}" style="background:none; border:1px solid ${reviewColor}; color:${reviewColor}; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:0.8rem;">${reviewLabel}</button>`;
-            const deleteBtn = `<button class="btn-delete-receipt-row" data-id="${r.id}" style="background:none; border:1px solid #6b7280; color:#9ca3af; border-radius:6px; padding:3px 8px; cursor:pointer; font-size:0.8rem;" title="Excluir">🗑</button>`;
+            const reviewBtn = r.status === 'pending'
+                ? `<button class="btn-review-receipt" data-id="${r.id}" data-user="${r.name}" style="background:none; border:1px solid #f59e0b; color:#f59e0b; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:0.8rem;">Revisar</button>`
+                : '';
             return `<tr>
                 <td>${date}</td>
                 <td>${r.name}</td>
                 <td>${r.matricula}</td>
                 <td style="color:${statusColor}; font-weight:600;">${statusLabel}${approvedAmt}${noteCell}</td>
-                <td style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">${viewLink}${reviewBtn}${deleteBtn}</td>
+                <td>${reviewBtn}</td>
             </tr>`;
         }).join('');
         receiptsTbody.querySelectorAll('.btn-review-receipt').forEach(btn => {
             btn.addEventListener('click', () => openApproveModal(btn.dataset.id, btn.dataset.user));
-        });
-        receiptsTbody.querySelectorAll('.btn-delete-receipt-row').forEach(btn => {
-            btn.addEventListener('click', () => deleteReceipt(btn.dataset.id));
         });
     }
 
@@ -846,20 +837,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function openApproveModal(id, userName) {
-        const receipt = allReceipts.find(r => String(r.id) === String(id));
-        const isPending = !receipt || receipt.status === 'pending';
-
         approveReceiptId.value = id;
         approveUserName.textContent = userName;
         approveAmountInput.value = '';
         approveMsg.textContent = '';
         approveViewFile.href = `/api/admin/receipts/${id}/file?token=${getToken()}`;
-
-        document.getElementById('approve-modal-title').textContent = isPending ? 'Revisar Comprovante' : 'Comprovante';
-        document.getElementById('approve-pending-section').style.display = isPending ? '' : 'none';
-        btnConfirmApprove.style.display = isPending ? '' : 'none';
-        btnConfirmReject.style.display = isPending ? '' : 'none';
-
         approveReceiptModal.classList.remove('hidden');
     }
 
@@ -917,31 +899,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch {}
     });
-
-    async function deleteReceipt(id) {
-        if (!confirm('Excluir este comprovante permanentemente?')) return;
-        const btn = receiptsTbody.querySelector(`.btn-delete-receipt-row[data-id="${id}"]`);
-        if (btn) { btn.disabled = true; btn.textContent = '...'; }
-        try {
-            const res = await fetch(`${API_URL}/admin/receipts/${id}`, {
-                method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${getToken()}` }
-            });
-            if (res.ok) {
-                approveReceiptModal.classList.add('hidden');
-                await loadReceipts();
-            } else {
-                const data = await res.json().catch(() => ({}));
-                showToast(data.error || `Erro ao excluir (HTTP ${res.status}).`, true);
-                if (btn) { btn.disabled = false; btn.textContent = '🗑'; }
-            }
-        } catch (err) {
-            showToast('Erro de conexão: ' + err.message, true);
-            if (btn) { btn.disabled = false; btn.textContent = '🗑'; }
-        }
-    }
-
-    document.getElementById('btn-delete-receipt').addEventListener('click', () => deleteReceipt(approveReceiptId.value));
 
     async function handleSavePix() {
         const pix_key = pixKeyInput.value.trim();
@@ -1349,23 +1306,5 @@ document.addEventListener('DOMContentLoaded', () => {
         element.textContent = text;
         element.style.color = isError ? 'var(--danger)' : 'var(--success)';
         setTimeout(() => element.textContent = '', 4000);
-    }
-
-    let _toastTimer = null;
-    function showToast(text, isError = false) {
-        let toast = document.getElementById('admin-toast');
-        if (!toast) {
-            toast = document.createElement('div');
-            toast.id = 'admin-toast';
-            toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:10px;font-size:0.9rem;font-weight:500;z-index:99999;transition:opacity 0.3s;pointer-events:none;';
-            document.body.appendChild(toast);
-        }
-        toast.textContent = text;
-        toast.style.background = isError ? '#7f1d1d' : '#14532d';
-        toast.style.color = isError ? '#fca5a5' : '#86efac';
-        toast.style.border = `1px solid ${isError ? '#ef4444' : '#22c55e'}`;
-        toast.style.opacity = '1';
-        clearTimeout(_toastTimer);
-        _toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
     }
 });

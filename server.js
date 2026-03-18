@@ -1,12 +1,8 @@
-const NODE_ENV = process.env.NODE_ENV || 'development';
-require('dotenv').config({ path: `.env.${NODE_ENV}` });
-require('dotenv').config(); // fallback to .env (won't override already-set vars)
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { pool, initSchema } = require('./database');
 
@@ -24,8 +20,15 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 const receiptsDir = path.join(__dirname, 'uploads', 'receipts');
 if (!fs.existsSync(receiptsDir)) fs.mkdirSync(receiptsDir, { recursive: true });
 
+const receiptStorage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, receiptsDir),
+    filename: (req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+        cb(null, `receipt_${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
+    }
+});
 const uploadReceipt = multer({
-    storage: multer.memoryStorage(),
+    storage: receiptStorage,
     limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
         const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf'];
@@ -648,37 +651,26 @@ app.delete('/api/admin/transactions/:id', requireAdmin, async (req, res) => {
 
 app.post('/api/receipts', uploadReceipt.single('comprovante'), async (req, res) => {
     try {
-        const { matricula } = req.body;
+        const { matricula, amount_declared } = req.body;
         if (!matricula || !req.file) {
+            if (req.file) fs.unlinkSync(req.file.path);
             return res.status(400).json({ error: 'Matrícula e comprovante são obrigatórios.' });
         }
-
-        const fileBuffer = req.file.buffer;
-        const fileHash = crypto.createHash('sha256').update(fileBuffer).digest('hex');
-
-        // Duplicate check by file hash
-        const dupHash = await pool.query('SELECT id FROM payment_receipts WHERE file_hash = $1', [fileHash]);
-        if (dupHash.rows.length > 0) {
-            return res.status(409).json({ error: 'Este comprovante já foi enviado anteriormente.', duplicate: true });
-        }
-
+        const amount = amount_declared ? parseFloat(amount_declared) : 0;
         const userResult = await pool.query('SELECT id FROM users WHERE matricula=$1', [matricula]);
         if (userResult.rows.length === 0) {
+            fs.unlinkSync(req.file.path);
             return res.status(404).json({ error: 'Usuário não encontrado.' });
         }
         const userId = userResult.rows[0].id;
-
-        const amount = req.body.amount_declared ? parseFloat(req.body.amount_declared) : 0;
-
         await pool.query(
-            `INSERT INTO payment_receipts
-             (user_id, amount_declared, file_path, file_name, file_type, file_data, file_hash)
-             VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-            [userId, amount, '', req.file.originalname, req.file.mimetype, fileBuffer, fileHash]
+            `INSERT INTO payment_receipts (user_id, amount_declared, file_path, file_name, file_type)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [userId, amount, req.file.filename, req.file.originalname, req.file.mimetype]
         );
-
         res.json({ success: true, message: 'Comprovante enviado! Aguardando aprovação do administrador.' });
     } catch (err) {
+        if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
         res.status(500).json({ error: err.message });
     }
 });
@@ -702,19 +694,18 @@ app.get('/api/receipts/:matricula/:id/file', async (req, res) => {
     try {
         const { matricula, id } = req.params;
         const result = await pool.query(
-            `SELECT pr.file_data, pr.file_path, pr.file_name, pr.file_type
+            `SELECT pr.file_path, pr.file_name, pr.file_type
              FROM payment_receipts pr
              JOIN users u ON pr.user_id = u.id
              WHERE pr.id = $1 AND u.matricula = $2`,
             [id, matricula]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Arquivo não encontrado.' });
-        const { file_data, file_path, file_name, file_type } = result.rows[0];
-        res.setHeader('Content-Type', file_type);
-        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file_name)}"`);
-        if (file_data) return res.send(file_data);
+        const { file_path, file_name, file_type } = result.rows[0];
         const fullPath = path.join(receiptsDir, file_path);
         if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Arquivo não encontrado no servidor.' });
+        res.setHeader('Content-Type', file_type);
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file_name)}"`);
         fs.createReadStream(fullPath).pipe(res);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -737,14 +728,13 @@ app.get('/api/admin/receipts', requireAdmin, async (req, res) => {
 
 app.get('/api/admin/receipts/:id/file', requireAdmin, async (req, res) => {
     try {
-        const result = await pool.query('SELECT file_data, file_path, file_name, file_type FROM payment_receipts WHERE id=$1', [req.params.id]);
+        const result = await pool.query('SELECT file_path, file_name, file_type FROM payment_receipts WHERE id=$1', [req.params.id]);
         if (result.rows.length === 0) return res.status(404).json({ error: 'Comprovante não encontrado.' });
-        const { file_data, file_path, file_name, file_type } = result.rows[0];
-        res.setHeader('Content-Type', file_type);
-        res.setHeader('Content-Disposition', `inline; filename="${file_name}"`);
-        if (file_data) return res.send(file_data);
+        const { file_path, file_name, file_type } = result.rows[0];
         const fullPath = path.join(receiptsDir, file_path);
         if (!fs.existsSync(fullPath)) return res.status(404).json({ error: 'Arquivo não encontrado no servidor.' });
+        res.setHeader('Content-Type', file_type);
+        res.setHeader('Content-Disposition', `inline; filename="${file_name}"`);
         fs.createReadStream(fullPath).pipe(res);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -794,17 +784,6 @@ app.put('/api/admin/receipts/:id/reject', requireAdmin, async (req, res) => {
             [notes || null, req.params.id]
         );
         if (result.rows.length === 0) return res.status(404).json({ error: 'Comprovante não encontrado ou já processado.' });
-        res.json({ success: true });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
-
-app.delete('/api/admin/receipts/:id', requireAdmin, async (req, res) => {
-    try {
-        const result = await pool.query('DELETE FROM payment_receipts WHERE id=$1 RETURNING id', [req.params.id]);
-        if (result.rows.length === 0) return res.status(404).json({ error: 'Comprovante não encontrado.' });
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -960,35 +939,11 @@ app.use((req, res) => {
     }
 });
 
-async function migrateFilesToDb() {
-    try {
-        const rows = await pool.query(
-            "SELECT id, file_path, file_type FROM payment_receipts WHERE file_data IS NULL AND file_path != ''"
-        );
-        for (const row of rows.rows) {
-            const fullPath = path.join(receiptsDir, row.file_path);
-            if (fs.existsSync(fullPath)) {
-                const data = fs.readFileSync(fullPath);
-                const hash = crypto.createHash('sha256').update(data).digest('hex');
-                await pool.query('UPDATE payment_receipts SET file_data=$1, file_hash=$2 WHERE id=$3', [data, hash, row.id]);
-                console.log(`Migrated receipt ${row.id} to database.`);
-            }
-        }
-    } catch (err) {
-        console.error('Receipt migration warning:', err.message);
-    }
-}
-
-module.exports = app;
-
-if (require.main === module) {
-    initSchema().then(async () => {
-        await migrateFilesToDb();
-        app.listen(PORT, () => {
-            console.log(`[${NODE_ENV}] Server running on http://localhost:${PORT}`);
-        });
-    }).catch(err => {
-        console.error('Failed to initialize database:', err);
-        process.exit(1);
+initSchema().then(() => {
+    app.listen(PORT, () => {
+        console.log(`Server running on http://localhost:${PORT}`);
     });
-}
+}).catch(err => {
+    console.error('Failed to initialize database:', err);
+    process.exit(1);
+});

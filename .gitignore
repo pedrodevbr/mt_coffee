@@ -3,6 +3,3 @@ node_modules
 error.log
 public/assets/qr_code.*
 .env
-.env.development
-.env.test
-.env.production
