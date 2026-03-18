@@ -920,24 +920,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function deleteReceipt(id) {
         if (!confirm('Excluir este comprovante permanentemente?')) return;
+        const btn = receiptsTbody.querySelector(`.btn-delete-receipt-row[data-id="${id}"]`);
+        if (btn) { btn.disabled = true; btn.textContent = '...'; }
         try {
-            const res = await authFetch(`${API_URL}/admin/receipts/${id}`, {
+            const res = await fetch(`${API_URL}/admin/receipts/${id}`, {
                 method: 'DELETE',
                 headers: { 'Authorization': `Bearer ${getToken()}` }
             });
             if (res.ok) {
                 approveReceiptModal.classList.add('hidden');
-                allReceipts = allReceipts.filter(r => String(r.id) !== String(id));
-                renderReceipts(currentReceiptFilter);
-                const pendingCount = allReceipts.filter(r => r.status === 'pending').length;
-                receiptsPendingBadge.textContent = `${pendingCount} pendente${pendingCount > 1 ? 's' : ''}`;
-                receiptsPendingBadge.style.display = pendingCount > 0 ? 'inline-block' : 'none';
+                await loadReceipts();
             } else {
                 const data = await res.json().catch(() => ({}));
-                alert(data.error || `Erro ao excluir (status ${res.status}).`);
+                showToast(data.error || `Erro ao excluir (HTTP ${res.status}).`, true);
+                if (btn) { btn.disabled = false; btn.textContent = '🗑'; }
             }
-        } catch {
-            alert('Erro de conexão ao tentar excluir.');
+        } catch (err) {
+            showToast('Erro de conexão: ' + err.message, true);
+            if (btn) { btn.disabled = false; btn.textContent = '🗑'; }
         }
     }
 
@@ -1349,5 +1349,23 @@ document.addEventListener('DOMContentLoaded', () => {
         element.textContent = text;
         element.style.color = isError ? 'var(--danger)' : 'var(--success)';
         setTimeout(() => element.textContent = '', 4000);
+    }
+
+    let _toastTimer = null;
+    function showToast(text, isError = false) {
+        let toast = document.getElementById('admin-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'admin-toast';
+            toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:10px;font-size:0.9rem;font-weight:500;z-index:99999;transition:opacity 0.3s;pointer-events:none;';
+            document.body.appendChild(toast);
+        }
+        toast.textContent = text;
+        toast.style.background = isError ? '#7f1d1d' : '#14532d';
+        toast.style.color = isError ? '#fca5a5' : '#86efac';
+        toast.style.border = `1px solid ${isError ? '#ef4444' : '#22c55e'}`;
+        toast.style.opacity = '1';
+        clearTimeout(_toastTimer);
+        _toastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
     }
 });
