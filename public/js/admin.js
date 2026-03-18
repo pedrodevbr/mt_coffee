@@ -923,19 +923,21 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const res = await authFetch(`${API_URL}/admin/receipts/${id}`, {
                 method: 'DELETE',
-                headers: authHeaders()
+                headers: { 'Authorization': `Bearer ${getToken()}` }
             });
             if (res.ok) {
                 approveReceiptModal.classList.add('hidden');
-                loadReceipts();
+                allReceipts = allReceipts.filter(r => String(r.id) !== String(id));
+                renderReceipts(currentReceiptFilter);
+                const pendingCount = allReceipts.filter(r => r.status === 'pending').length;
+                receiptsPendingBadge.textContent = `${pendingCount} pendente${pendingCount > 1 ? 's' : ''}`;
+                receiptsPendingBadge.style.display = pendingCount > 0 ? 'inline-block' : 'none';
             } else {
-                const data = await res.json();
-                approveMsg.style.color = '#f87171';
-                approveMsg.textContent = data.error || 'Erro ao excluir.';
+                const data = await res.json().catch(() => ({}));
+                alert(data.error || `Erro ao excluir (status ${res.status}).`);
             }
         } catch {
-            approveMsg.style.color = '#f87171';
-            approveMsg.textContent = 'Erro de conexão.';
+            alert('Erro de conexão ao tentar excluir.');
         }
     }
 
