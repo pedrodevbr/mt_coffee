@@ -749,25 +749,30 @@
         </div>
     </div>
 
-    <!-- Approve Receipt Modal -->
+    <!-- Receipt Modal (review pending / view all) -->
     <div class="modal hidden" id="approve-receipt-modal">
         <div class="modal-content glass-panel">
             <span class="close-btn" id="close-approve-modal">&times;</span>
-            <h2>Aprovar Comprovante</h2>
+            <h2 id="approve-modal-title">Comprovante</h2>
             <input type="hidden" id="approve-receipt-id">
             <div style="margin: 18px 0 10px; background:rgba(255,255,255,0.05); border-radius:10px; padding:14px; font-size:0.9rem;">
                 <div style="margin-bottom:6px;"><span style="color:var(--text-muted);">Usuário: </span><strong id="approve-user-name">--</strong></div>
                 <div><span style="color:var(--text-muted);">Arquivo: </span><a id="approve-view-file" href="#" target="_blank" style="color:#60a5fa; font-size:0.85rem;">Ver comprovante ↗</a></div>
             </div>
-<div class="input-group small">
-                <input type="number" id="approve-amount-input" step="0.01" min="0.01" placeholder=" ">
-                <label for="approve-amount-input">Valor a Creditar (R$)</label>
+            <!-- Shown only for pending receipts -->
+            <div id="approve-pending-section">
+                <div class="input-group small">
+                    <input type="number" id="approve-amount-input" step="0.01" min="0.01" placeholder=" ">
+                    <label for="approve-amount-input">Valor a Creditar (R$)</label>
+                </div>
             </div>
             <p id="approve-msg" style="min-height:18px; font-size:0.85rem; text-align:center; margin-bottom:8px;"></p>
             <div style="display:flex; gap:10px;">
-                <button type="button" class="btn btn-primary" id="btn-confirm-approve" style="flex:1;">Confirmar Aprovação</button>
-                <button type="button" class="btn" id="btn-confirm-reject" style="flex:0 0 auto; background:#7f1d1d; border-color:#ef4444; color:#fca5a5; padding:0 18px;">Rejeitar</button>
-                <button type="button" class="btn" id="btn-delete-receipt" style="flex:0 0 auto; background:#1e1e1e; border-color:#6b7280; color:#9ca3af; padding:0 14px;" title="Excluir comprovante">🗑</button>
+                <!-- Shown only for pending receipts -->
+                <button type="button" class="btn btn-primary" id="btn-confirm-approve" style="flex:1; display:none;">Confirmar Aprovação</button>
+                <button type="button" class="btn" id="btn-confirm-reject" style="flex:0 0 auto; background:#7f1d1d; border-color:#ef4444; color:#fca5a5; padding:0 18px; display:none;">Rejeitar</button>
+                <!-- Always visible -->
+                <button type="button" class="btn" id="btn-delete-receipt" style="flex:0 0 auto; background:none; border:1px solid #6b7280; color:#9ca3af; padding:6px 16px; cursor:pointer;" title="Excluir comprovante">🗑 Excluir</button>
             </div>
         </div>
     </div>

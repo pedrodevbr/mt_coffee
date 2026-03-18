@@ -820,20 +820,24 @@ document.addEventListener('DOMContentLoaded', () => {
             const approvedAmt = r.amount_approved ? `<br><span style="font-size:0.78rem; color:#4ade80;">Aprovado: R$ ${parseFloat(r.amount_approved).toFixed(2).replace('.', ',')}</span>` : '';
             const noteCell = r.notes ? `<br><span style="font-size:0.78rem; color:#f87171;">${r.notes}</span>` : '';
             const fileUrl = `/api/admin/receipts/${r.id}/file?token=${getToken()}`;
-            const viewLink = `<a href="${fileUrl}" target="_blank" style="color:#60a5fa; font-size:0.8rem; text-decoration:none;">Ver fatura ↗</a>`;
-            const reviewBtn = r.status === 'pending'
-                ? `<button class="btn-review-receipt" data-id="${r.id}" data-user="${r.name}" style="background:none; border:1px solid #f59e0b; color:#f59e0b; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:0.8rem;">Revisar</button>`
-                : '';
+            const viewLink = `<a href="${fileUrl}" target="_blank" style="color:#60a5fa; font-size:0.8rem; text-decoration:none;">Ver ↗</a>`;
+            const reviewLabel = r.status === 'pending' ? 'Revisar' : 'Ver detalhes';
+            const reviewColor = r.status === 'pending' ? '#f59e0b' : '#94a3b8';
+            const reviewBtn = `<button class="btn-review-receipt" data-id="${r.id}" data-user="${r.name}" style="background:none; border:1px solid ${reviewColor}; color:${reviewColor}; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:0.8rem;">${reviewLabel}</button>`;
+            const deleteBtn = `<button class="btn-delete-receipt-row" data-id="${r.id}" style="background:none; border:1px solid #6b7280; color:#9ca3af; border-radius:6px; padding:3px 8px; cursor:pointer; font-size:0.8rem;" title="Excluir">🗑</button>`;
             return `<tr>
                 <td>${date}</td>
                 <td>${r.name}</td>
                 <td>${r.matricula}</td>
                 <td style="color:${statusColor}; font-weight:600;">${statusLabel}${approvedAmt}${noteCell}</td>
-                <td style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">${viewLink}${reviewBtn}</td>
+                <td style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">${viewLink}${reviewBtn}${deleteBtn}</td>
             </tr>`;
         }).join('');
         receiptsTbody.querySelectorAll('.btn-review-receipt').forEach(btn => {
             btn.addEventListener('click', () => openApproveModal(btn.dataset.id, btn.dataset.user));
+        });
+        receiptsTbody.querySelectorAll('.btn-delete-receipt-row').forEach(btn => {
+            btn.addEventListener('click', () => deleteReceipt(btn.dataset.id));
         });
     }
 
@@ -842,11 +846,20 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function openApproveModal(id, userName) {
+        const receipt = allReceipts.find(r => String(r.id) === String(id));
+        const isPending = !receipt || receipt.status === 'pending';
+
         approveReceiptId.value = id;
         approveUserName.textContent = userName;
         approveAmountInput.value = '';
         approveMsg.textContent = '';
         approveViewFile.href = `/api/admin/receipts/${id}/file?token=${getToken()}`;
+
+        document.getElementById('approve-modal-title').textContent = isPending ? 'Revisar Comprovante' : 'Comprovante';
+        document.getElementById('approve-pending-section').style.display = isPending ? '' : 'none';
+        btnConfirmApprove.style.display = isPending ? '' : 'none';
+        btnConfirmReject.style.display = isPending ? '' : 'none';
+
         approveReceiptModal.classList.remove('hidden');
     }
 
@@ -905,9 +918,8 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch {}
     });
 
-    document.getElementById('btn-delete-receipt').addEventListener('click', async () => {
+    async function deleteReceipt(id) {
         if (!confirm('Excluir este comprovante permanentemente?')) return;
-        const id = approveReceiptId.value;
         try {
             const res = await authFetch(`${API_URL}/admin/receipts/${id}`, {
                 method: 'DELETE',
@@ -925,7 +937,9 @@ document.addEventListener('DOMContentLoaded', () => {
             approveMsg.style.color = '#f87171';
             approveMsg.textContent = 'Erro de conexão.';
         }
-    });
+    }
+
+    document.getElementById('btn-delete-receipt').addEventListener('click', () => deleteReceipt(approveReceiptId.value));
 
     async function handleSavePix() {
         const pix_key = pixKeyInput.value.trim();
