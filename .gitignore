@@ -3,3 +3,5 @@ node_modules
 error.log
 public/assets/qr_code.*
 .env
+uploads/receipts/*
+!uploads/receipts/.gitkeep
