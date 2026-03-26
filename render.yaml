@@ -1,0 +1,26 @@
+databases:
+  - name: mt-coffee-db
+    plan: starter
+    databaseName: mt_coffee
+    user: mt_coffee_user
+
+services:
+  - type: web
+    name: mt-coffee
+    runtime: node
+    plan: starter
+    buildCommand: npm ci --omit=dev
+    startCommand: node server.js
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mt-coffee-db
+          property: connectionString
+      - key: JWT_SECRET
+        value: d335aa0c8fb5071f443ad75b7fe7b450522eaba0d18cf7cd1fcc0adbc02c52bf
+      - key: NODE_ENV
+        value: production
+    disk:
+      name: receipt-uploads
+      mountPath: /app/uploads/receipts
+      sizeGB: 1
