@@ -105,11 +105,42 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function fmtR(v) { return parseFloat(v || 0).toFixed(2).replace('.', ','); }
+    function fmtR4(v) { return parseFloat(v || 0).toFixed(4).replace('.', ','); }
+
+    // Toggle dose price details
+    const dosePriceToggle = document.getElementById('dose-price-toggle');
+    const dosePriceDetails = document.getElementById('dose-price-details');
+    if (dosePriceToggle && dosePriceDetails) {
+        dosePriceToggle.addEventListener('click', () => {
+            dosePriceDetails.style.display = dosePriceDetails.style.display === 'none' ? 'block' : 'none';
+        });
+    }
+
     function updateSystemUI() {
         if (!systemState) return;
 
         stockLevel.textContent = `${systemState.coffee_stock_grams.toFixed(0)} g`;
         dosePrice.textContent = `R$ ${systemState.current_price_per_dose.toFixed(2).replace('.', ',')}`;
+
+        // Update price details breakdown
+        if (dosePriceDetails) {
+            const basePpd = parseFloat(systemState.base_price_per_dose || 0);
+            const extraPpd = parseFloat(systemState.extra_cost_per_dose || 0);
+            const remainingExtras = parseFloat(systemState.remaining_extra_costs || 0);
+            const remainingCost = parseFloat(systemState.remaining_cost || 0);
+            const stockGrams = parseFloat(systemState.coffee_stock_grams || 0);
+            const remainingDoses = parseInt(systemState.remaining_doses || 0);
+            const doseGrams = parseFloat(systemState.dose_grams || 10);
+            const currentPrice = parseFloat(systemState.current_price_per_dose || 0);
+
+            let html = `<div style="display:flex; justify-content:space-between;"><span style="opacity:0.7;">Café (R$ ${fmtR(remainingCost)} / ${stockGrams.toFixed(0)}g)</span><span>R$ ${fmtR4(basePpd)}</span></div>`;
+            if (remainingExtras > 0) {
+                html += `<div style="display:flex; justify-content:space-between;"><span style="opacity:0.7;">Extras (R$ ${fmtR(remainingExtras)} ÷ ${remainingDoses} doses)</span><span style="color:#f59e0b;">+ R$ ${fmtR4(extraPpd)}</span></div>`;
+            }
+            html += `<div style="display:flex; justify-content:space-between; font-weight:700; margin-top:4px; padding-top:4px; border-top:1px solid rgba(245,158,11,0.2);"><span>Total por dose (${doseGrams.toFixed(0)}g)</span><span style="color:#f59e0b;">R$ ${fmtR(currentPrice)}</span></div>`;
+            dosePriceDetails.innerHTML = html;
+        }
 
         const maxCapacity = 2000;
         let percentage = (systemState.coffee_stock_grams / maxCapacity) * 100;

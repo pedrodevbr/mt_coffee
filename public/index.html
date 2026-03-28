@@ -33,11 +33,13 @@
                         >Estoque Atual:
                         <strong id="stock-level">-- g</strong></span
                     >
-                    <span
+                    <span style="cursor:pointer;" id="dose-price-toggle" title="Clique para ver detalhes"
                         >Preço/Dose:
-                        <strong id="dose-price">R$ --</strong></span
+                        <strong id="dose-price">R$ --</strong>
+                        <span style="font-size:0.7rem; opacity:0.6;">&#9432;</span></span
                     >
                 </div>
+                <div id="dose-price-details" style="display:none; background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.2); border-radius:8px; padding:10px 12px; margin-top:8px; font-size:0.78rem; line-height:1.7;"></div>
                 <div class="progress-bar">
                     <div class="progress-fill" id="stock-progress"></div>
                 </div>

@@ -360,37 +360,97 @@ document.addEventListener('DOMContentLoaded', () => {
     // =====================
     //  SYSTEM STATE
     // =====================
+    function fmtR(v) { return parseFloat(v || 0).toFixed(2).replace('.', ','); }
+    function fmtR4(v) { return parseFloat(v || 0).toFixed(4).replace('.', ','); }
+
     async function loadSystemState() {
         try {
             const res = await fetch(`${API_URL}/system`);
             if (res.ok) {
                 const state = await res.json();
                 adminCurrentStock.textContent = `${parseFloat(state.coffee_stock_grams).toFixed(0)} g`;
-                adminDosePrice.textContent = `R$ ${parseFloat(state.current_price_per_dose).toFixed(2).replace('.', ',')}`;
+                adminDosePrice.textContent = `R$ ${fmtR(state.current_price_per_dose)}`;
 
                 const adjVirtualEl = document.getElementById('adjust-virtual-stock');
                 if (adjVirtualEl) adjVirtualEl.textContent = `${parseFloat(state.coffee_stock_grams).toFixed(0)} g`;
 
-                const extraTotalEl = document.getElementById('admin-extra-total');
-                if (extraTotalEl) extraTotalEl.textContent = `R$ ${parseFloat(state.extra_costs_total || 0).toFixed(2).replace('.', ',')}`;
+                // Render full calculation breakdown
+                const breakdownEl = document.getElementById('dose-calc-breakdown');
+                if (breakdownEl) {
+                    const totalGrams = parseFloat(state.total_purchased_grams || 0);
+                    const totalCost = parseFloat(state.total_purchase_cost || 0);
+                    const extraTotal = parseFloat(state.extra_costs_total || 0);
+                    const remainingExtras = parseFloat(state.remaining_extra_costs || 0);
+                    const remainingCost = parseFloat(state.remaining_cost || 0);
+                    const basePpd = parseFloat(state.base_price_per_dose || 0);
+                    const extraPpd = parseFloat(state.extra_cost_per_dose || 0);
+                    const doseGrams = parseFloat(state.dose_grams || 10);
+                    const remainingDoses = parseInt(state.remaining_doses || 0);
+                    const totalConsumptions = parseInt(state.total_consumptions || 0);
+                    const currentPrice = parseFloat(state.current_price_per_dose || 0);
+                    const stockGrams = parseFloat(state.coffee_stock_grams || 0);
+                    const baseCostPerGram = stockGrams > 0 ? remainingCost / stockGrams : 0;
+                    const extrasConsumed = extraTotal - remainingExtras;
+                    const extrasPercent = extraTotal > 0 ? Math.round((extrasConsumed / extraTotal) * 100) : 0;
 
+                    breakdownEl.innerHTML = `
+                        <div style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.2); border-radius:10px; padding:14px; margin-top:12px; font-size:0.8rem; line-height:1.8;">
+                            <div style="font-weight:600; margin-bottom:8px; color:#f59e0b; font-size:0.85rem;">Como o preço da dose é calculado</div>
+
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Investimento total (histórico)</div>
+                            <div style="display:flex; justify-content:space-between;"><span>Compras de café</span><span>R$ ${fmtR(totalCost)} / ${totalGrams.toFixed(0)}g</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>Custos extras (frete, etc.)</span><span style="color:#f59e0b;">R$ ${fmtR(extraTotal)}</span></div>
+
+                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
+
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Saldo restante no estoque</div>
+                            <div style="display:flex; justify-content:space-between;"><span>Custo café restante</span><span>R$ ${fmtR(remainingCost)} / ${stockGrams.toFixed(0)}g</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>Extras a diluir</span><span style="color:#f59e0b;">R$ ${fmtR(remainingExtras)} <span style="opacity:0.6; font-size:0.72rem;">(${extrasPercent}% absorvido)</span></span></div>
+
+                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
+
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Fórmula da dose</div>
+                            <div style="background:rgba(0,0,0,0.15); border-radius:6px; padding:8px 10px; font-family:monospace; font-size:0.78rem; margin-bottom:6px;">
+                                <div style="color:var(--text-muted);">base = R$ ${fmtR(remainingCost)} ÷ ${stockGrams.toFixed(0)}g × ${doseGrams.toFixed(0)}g = <strong style="color:var(--text-primary);">R$ ${fmtR4(basePpd)}</strong></div>
+                                ${remainingExtras > 0 ? `<div style="color:var(--text-muted); margin-top:2px;">extras = R$ ${fmtR(remainingExtras)} ÷ ${remainingDoses} doses = <strong style="color:#f59e0b;">R$ ${fmtR4(extraPpd)}</strong></div>` : ''}
+                                <div style="color:var(--text-muted); margin-top:2px;">total = R$ ${fmtR4(basePpd)}${remainingExtras > 0 ? ` + R$ ${fmtR4(extraPpd)}` : ''} = <strong style="color:#f59e0b;">R$ ${fmtR(currentPrice)}</strong></div>
+                            </div>
+
+                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
+
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Composição por dose</div>
+                            <div style="display:flex; justify-content:space-between;"><span>Café (R$ ${fmtR4(baseCostPerGram)}/g × ${doseGrams.toFixed(0)}g)</span><span>R$ ${fmtR4(basePpd)}</span></div>
+                            ${remainingExtras > 0 ? `<div style="display:flex; justify-content:space-between;"><span>Extras (R$ ${fmtR(remainingExtras)} ÷ ${remainingDoses} doses)</span><span style="color:#f59e0b;">+ R$ ${fmtR4(extraPpd)}</span></div>` : ''}
+                            <div style="display:flex; justify-content:space-between; font-weight:700; font-size:0.88rem; margin-top:4px; padding-top:4px; border-top:1px solid rgba(245,158,11,0.2);"><span>Preço final/dose</span><span style="color:#f59e0b;">R$ ${fmtR(currentPrice)}</span></div>
+
+                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
+
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Status</div>
+                            <div style="display:flex; justify-content:space-between;"><span>Estoque restante</span><span>${stockGrams.toFixed(0)}g (${remainingDoses} doses)</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>Doses consumidas</span><span>${totalConsumptions}</span></div>
+                        </div>`;
+                }
+
+                // Extra costs section info
                 const dilutionEl = document.getElementById('extra-cost-dilution-info');
                 if (dilutionEl) {
                     const extraTotal = parseFloat(state.extra_costs_total || 0);
-                    const extraPerDose = parseFloat(state.extra_cost_per_dose || 0);
-                    const basePpd = parseFloat(state.base_price_per_dose || 0);
-
+                    const remainingExtras = parseFloat(state.remaining_extra_costs || 0);
                     if (extraTotal <= 0) {
                         dilutionEl.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem; text-align:center; margin-top:10px;">Nenhum custo extra ativo.</p>';
                     } else {
+                        const extraPpd = parseFloat(state.extra_cost_per_dose || 0);
+                        const remainingDoses = parseInt(state.remaining_doses || 0);
+                        const absorbed = extraTotal - remainingExtras;
+                        const pct = Math.round((absorbed / extraTotal) * 100);
                         dilutionEl.innerHTML = `
-                            <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:8px; padding:12px; margin-top:10px; font-size:0.82rem; line-height:1.7;">
-                                <div style="font-weight:600; margin-bottom:6px; color:#f59e0b;">Composição do preço por dose</div>
-                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Total de custos extras</span><strong>R$ ${extraTotal.toFixed(2).replace('.', ',')}</strong></div>
-                                <hr style="border:none; border-top:1px solid rgba(245,158,11,0.2); margin:6px 0;">
-                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Custo base/dose (café)</span><span>R$ ${basePpd.toFixed(4).replace('.', ',')}</span></div>
-                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">+ Custo extra/dose</span><span style="color:#f59e0b;">+ R$ ${extraPerDose.toFixed(4).replace('.', ',')}</span></div>
-                                <div style="display:flex; justify-content:space-between; margin-top:4px; font-weight:700; font-size:0.88rem;"><span>Preço final/dose</span><span style="color:#f59e0b;">R$ ${(basePpd + extraPerDose).toFixed(2).replace('.', ',')}</span></div>
+                            <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:8px; padding:10px; margin-top:10px; font-size:0.8rem; line-height:1.6;">
+                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Total de custos extras</span><strong>R$ ${fmtR(extraTotal)}</strong></div>
+                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Restante a diluir</span><strong style="color:#f59e0b;">R$ ${fmtR(remainingExtras)}</strong></div>
+                                <div style="background:rgba(0,0,0,0.1); border-radius:4px; height:6px; margin:6px 0; overflow:hidden;">
+                                    <div style="background:#f59e0b; height:100%; width:${pct}%; border-radius:4px; transition:width 0.3s;"></div>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; font-size:0.72rem;"><span style="color:var(--text-muted);">${pct}% absorvido em ${parseInt(state.total_consumptions || 0)} doses</span><span style="color:var(--text-muted);">+R$ ${fmtR4(extraPpd)}/dose × ${remainingDoses} restantes</span></div>
                             </div>`;
                     }
                 }
