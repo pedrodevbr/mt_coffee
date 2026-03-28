@@ -127,15 +127,16 @@ document.addEventListener('DOMContentLoaded', () => {
         if (dosePriceDetails) {
             const basePpd = parseFloat(systemState.base_price_per_dose || 0);
             const extraPpd = parseFloat(systemState.extra_cost_per_dose || 0);
-            const extraTotal = parseFloat(systemState.extra_costs_total || 0);
-            const totalCost = parseFloat(systemState.total_purchase_cost || 0);
-            const totalGrams = parseFloat(systemState.total_purchased_grams || 0);
+            const remainingExtras = parseFloat(systemState.remaining_extra_costs || 0);
+            const remainingCost = parseFloat(systemState.remaining_cost || 0);
+            const stockGrams = parseFloat(systemState.coffee_stock_grams || 0);
+            const remainingDoses = parseInt(systemState.remaining_doses || 0);
             const doseGrams = parseFloat(systemState.dose_grams || 10);
             const currentPrice = parseFloat(systemState.current_price_per_dose || 0);
 
-            let html = `<div style="display:flex; justify-content:space-between;"><span style="opacity:0.7;">Café (R$ ${fmtR(totalCost)} / ${totalGrams.toFixed(0)}g)</span><span>R$ ${fmtR4(basePpd)}</span></div>`;
-            if (extraTotal > 0) {
-                html += `<div style="display:flex; justify-content:space-between;"><span style="opacity:0.7;">Extras (R$ ${fmtR(extraTotal)})</span><span style="color:#f59e0b;">+ R$ ${fmtR4(extraPpd)}</span></div>`;
+            let html = `<div style="display:flex; justify-content:space-between;"><span style="opacity:0.7;">Café (R$ ${fmtR(remainingCost)} / ${stockGrams.toFixed(0)}g)</span><span>R$ ${fmtR4(basePpd)}</span></div>`;
+            if (remainingExtras > 0) {
+                html += `<div style="display:flex; justify-content:space-between;"><span style="opacity:0.7;">Extras (R$ ${fmtR(remainingExtras)} ÷ ${remainingDoses} doses)</span><span style="color:#f59e0b;">+ R$ ${fmtR4(extraPpd)}</span></div>`;
             }
             html += `<div style="display:flex; justify-content:space-between; font-weight:700; margin-top:4px; padding-top:4px; border-top:1px solid rgba(245,158,11,0.2);"><span>Total por dose (${doseGrams.toFixed(0)}g)</span><span style="color:#f59e0b;">R$ ${fmtR(currentPrice)}</span></div>`;
             dosePriceDetails.innerHTML = html;

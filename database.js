@@ -64,6 +64,10 @@ async function initSchema() {
         `);
 
         await client.query(`
+            ALTER TABLE system_state ADD COLUMN IF NOT EXISTS remaining_extra_costs REAL DEFAULT 0.0
+        `);
+
+        await client.query(`
             CREATE TABLE IF NOT EXISTS stock_adjustments (
                 id SERIAL PRIMARY KEY,
                 grams_before REAL NOT NULL,
