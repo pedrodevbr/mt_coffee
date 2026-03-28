@@ -107,33 +107,17 @@ app.post('/api/admin/pin', requireAdmin, async (req, res) => {
 // =====================
 app.get('/api/system', async (req, res) => {
     try {
-        const [stateResult, settingResult, extraResult] = await Promise.all([
-            pool.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1'),
-            pool.query("SELECT value FROM settings WHERE key = $1", ['dose_grams']),
-            pool.query('SELECT COALESCE(SUM(amount), 0) AS total FROM extra_costs')
-        ]);
-
-        const doseGrams = settingResult.rows.length ? parseFloat(settingResult.rows[0].value) : 10;
+        const priceData = await computeAndStoreDosePrice();
+        const stateResult = await pool.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');
         const state = stateResult.rows.length ? stateResult.rows[0] : { coffee_stock_grams: 0, stock_total_cost: 0, qr_code_url: '', pix_key: '' };
-        const extraTotal = parseFloat(extraResult.rows[0].total);
-
-        const DILUTION_DOSES = 1000;
-        const extraCostPerDose = extraTotal / DILUTION_DOSES;
-
-        let basePricePerDose = 0;
-        if (state.coffee_stock_grams > 0) {
-            basePricePerDose = (state.stock_total_cost / state.coffee_stock_grams) * doseGrams;
-        }
-        const currentPricePerDose = basePricePerDose + extraCostPerDose;
 
         res.json({
             ...state,
-            dose_grams: doseGrams,
-            current_price_per_dose: currentPricePerDose,
-            base_price_per_dose: basePricePerDose,
-            extra_costs_total: extraTotal,
-            extra_cost_per_dose: extraCostPerDose,
-            dilution_doses: DILUTION_DOSES
+            dose_grams: priceData.doseGrams,
+            current_price_per_dose: priceData.currentPricePerDose,
+            base_price_per_dose: priceData.basePricePerDose,
+            extra_costs_total: priceData.extraTotal,
+            extra_cost_per_dose: priceData.extraCostPerDose
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -151,21 +135,27 @@ app.post('/api/system/stock', requireAdmin, async (req, res) => {
         const grams = parseFloat(added_grams);
         const cost = parseFloat(added_cost || 0);
 
-        const stateResult = await pool.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');
-        const state = stateResult.rows[0];
+        await pool.query('INSERT INTO stock_history (added_grams, added_cost) VALUES ($1, $2)', [grams, cost]);
 
-        const newGrams = (state ? state.coffee_stock_grams : 0) + grams;
-        const newCost = (state ? state.stock_total_cost : 0) + cost;
-
-        await pool.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [newGrams, newCost]);
-
-        const doseResult = await pool.query("SELECT value FROM settings WHERE key = 'dose_grams'");
-        const doseGrams = doseResult.rows.length ? parseFloat(doseResult.rows[0].value) : 10;
-        const pricePerDose = newGrams > 0 ? (newCost / newGrams) * doseGrams : 0;
-
-        await pool.query('INSERT INTO stock_history (added_grams, added_cost, price_per_dose) VALUES ($1, $2, $3)', [grams, cost, pricePerDose]);
-
-        res.json({ success: true, message: "Stock updated successfully", newStock: newGrams });
+        // Recalculate full state (stock + cost including extras) and dose price
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            const { currentStock } = await recalculateStockState(client);
+            const priceData = await computeAndStoreDosePrice(client);
+            // Update price_per_dose on the just-inserted stock_history entry
+            await client.query(
+                'UPDATE stock_history SET price_per_dose = $1 WHERE id = (SELECT MAX(id) FROM stock_history)',
+                [priceData.currentPricePerDose]
+            );
+            await client.query('COMMIT');
+            res.json({ success: true, message: "Stock updated successfully", newStock: currentStock });
+        } catch (innerErr) {
+            await client.query('ROLLBACK');
+            throw innerErr;
+        } finally {
+            client.release();
+        }
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -194,18 +184,57 @@ async function recalculateStockState(client) {
         'SELECT COALESCE(SUM(added_grams),0) AS tg, COALESCE(SUM(added_cost),0) AS tc FROM stock_history'
     );
     const totalGrams = parseFloat(stockSum.rows[0].tg);
-    const totalCost = parseFloat(stockSum.rows[0].tc);
+    const totalPurchaseCost = parseFloat(stockSum.rows[0].tc);
     const consResult = await client.query("SELECT COUNT(*) AS cnt FROM transactions WHERE type='consumption'");
     const consumedGrams = parseInt(consResult.rows[0].cnt) * doseGrams;
     const adjResult = await client.query(
         'SELECT COALESCE(SUM(delta_grams),0) AS dg FROM stock_adjustments'
     );
     const adjGrams = parseFloat(adjResult.rows[0].dg);
-    // Cost is never adjusted — all purchase cost remains as sunk cost,
-    // so losses increase price per dose and gains decrease it.
+    const extraResult = await client.query('SELECT COALESCE(SUM(amount),0) AS total FROM extra_costs');
+    const extraTotal = parseFloat(extraResult.rows[0].total);
+
     const currentStock = Math.max(0, totalGrams - consumedGrams + adjGrams);
-    await client.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [currentStock, totalCost]);
-    return { currentStock, totalCost };
+    // Full cost = purchases + extras, proportional to remaining stock
+    const fullCost = totalPurchaseCost + extraTotal;
+    const currentCost = totalGrams > 0 ? (fullCost / totalGrams) * currentStock : 0;
+    await client.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [currentStock, currentCost]);
+    return { currentStock, currentCost };
+}
+
+async function computeAndStoreDosePrice(clientOrPool) {
+    const db = clientOrPool || pool;
+    const [stateResult, settingResult, extraResult, stockSumResult] = await Promise.all([
+        db.query('SELECT coffee_stock_grams, stock_total_cost FROM system_state ORDER BY id DESC LIMIT 1'),
+        db.query("SELECT value FROM settings WHERE key = 'dose_grams'"),
+        db.query('SELECT COALESCE(SUM(amount), 0) AS total FROM extra_costs'),
+        db.query('SELECT COALESCE(SUM(added_grams),0) AS tg, COALESCE(SUM(added_cost),0) AS tc FROM stock_history')
+    ]);
+    const state = stateResult.rows[0] || { coffee_stock_grams: 0, stock_total_cost: 0 };
+    const doseGrams = settingResult.rows.length ? parseFloat(settingResult.rows[0].value) : 10;
+    const extraTotal = parseFloat(extraResult.rows[0].total);
+    const totalPurchasedGrams = parseFloat(stockSumResult.rows[0].tg);
+    const totalPurchaseCost = parseFloat(stockSumResult.rows[0].tc);
+
+    // Price per dose from stock_total_cost (already includes extras after recalculate)
+    let currentPricePerDose = 0;
+    if (state.coffee_stock_grams > 0) {
+        currentPricePerDose = (state.stock_total_cost / state.coffee_stock_grams) * doseGrams;
+    }
+
+    // Breakdown for display: base vs extras (computed from original tables)
+    let basePricePerDose = 0;
+    let extraCostPerDose = 0;
+    if (totalPurchasedGrams > 0) {
+        const costPerGramPurchase = totalPurchaseCost / totalPurchasedGrams;
+        const costPerGramExtra = extraTotal / totalPurchasedGrams;
+        basePricePerDose = costPerGramPurchase * doseGrams;
+        extraCostPerDose = costPerGramExtra * doseGrams;
+    }
+
+    await db.query('UPDATE system_state SET current_price_per_dose = $1', [currentPricePerDose]);
+
+    return { currentPricePerDose, basePricePerDose, extraCostPerDose, extraTotal, doseGrams };
 }
 
 app.put('/api/admin/stock-history/:id', requireAdmin, async (req, res) => {
@@ -225,6 +254,7 @@ app.put('/api/admin/stock-history/:id', requireAdmin, async (req, res) => {
             params
         );
         const { currentStock } = await recalculateStockState(client);
+        await computeAndStoreDosePrice(client);
         await client.query('COMMIT');
         res.json({ success: true, newStock: currentStock });
     } catch (err) {
@@ -243,6 +273,7 @@ app.delete('/api/admin/stock-history/:id', requireAdmin, async (req, res) => {
         if (exists.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Remessa não encontrada.' }); }
         await client.query('DELETE FROM stock_history WHERE id=$1', [req.params.id]);
         const { currentStock } = await recalculateStockState(client);
+        await computeAndStoreDosePrice(client);
         await client.query('COMMIT');
         res.json({ success: true, newStock: currentStock });
     } catch (err) {
@@ -279,10 +310,9 @@ app.post('/api/admin/stock/adjust', requireAdmin, async (req, res) => {
             'INSERT INTO stock_adjustments (grams_before, grams_after, delta_grams, delta_cost, reason) VALUES ($1,$2,$3,$4,$5)',
             [currentGrams, physicalGrams, deltaGrams, 0, reason || null]
         );
-        await client.query(
-            'UPDATE system_state SET coffee_stock_grams=$1',
-            [Math.max(0, physicalGrams)]
-        );
+        // Recalculate full state from source of truth (includes adjustments)
+        await recalculateStockState(client);
+        await computeAndStoreDosePrice(client);
         await client.query('COMMIT');
         res.json({ success: true, grams_before: currentGrams, grams_after: physicalGrams, delta_grams: deltaGrams });
     } catch (err) {
@@ -316,24 +346,40 @@ app.post('/api/admin/extra-costs', requireAdmin, async (req, res) => {
     if (!description || !description.trim()) return res.status(400).json({ error: 'Descrição obrigatória.' });
     const amt = parseFloat(amount);
     if (isNaN(amt) || amt <= 0) return res.status(400).json({ error: 'Valor inválido.' });
+    const client = await pool.connect();
     try {
-        const result = await pool.query(
+        await client.query('BEGIN');
+        const result = await client.query(
             'INSERT INTO extra_costs (description, amount) VALUES ($1, $2) RETURNING *',
             [description.trim(), amt]
         );
+        await recalculateStockState(client);
+        await computeAndStoreDosePrice(client);
+        await client.query('COMMIT');
         res.json(result.rows[0]);
     } catch (err) {
+        await client.query('ROLLBACK');
         res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
     }
 });
 
 app.delete('/api/admin/extra-costs/:id', requireAdmin, async (req, res) => {
+    const client = await pool.connect();
     try {
-        const result = await pool.query('DELETE FROM extra_costs WHERE id=$1 RETURNING id', [req.params.id]);
-        if (result.rows.length === 0) return res.status(404).json({ error: 'Custo não encontrado.' });
+        await client.query('BEGIN');
+        const result = await client.query('DELETE FROM extra_costs WHERE id=$1 RETURNING id', [req.params.id]);
+        if (result.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Custo não encontrado.' }); }
+        await recalculateStockState(client);
+        await computeAndStoreDosePrice(client);
+        await client.query('COMMIT');
         res.json({ success: true });
     } catch (err) {
+        await client.query('ROLLBACK');
         res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
     }
 });
 
@@ -530,20 +576,22 @@ app.post('/api/consume', async (req, res) => {
             return res.status(400).json({ error: 'Not enough coffee stock!' });
         }
 
-        const costPerGram = state.stock_total_cost / state.coffee_stock_grams;
-        const basePricePerDose = costPerGram * doseGrams;
+        // Use stored price (already includes extras proportionally)
+        const pricePerDose = parseFloat(state.current_price_per_dose) || 0;
 
-        const extraResult = await client.query('SELECT COALESCE(SUM(amount), 0) AS total FROM extra_costs');
-        const extraTotal = parseFloat(extraResult.rows[0].total);
-        const extraCostPerDose = extraTotal / 1000;
-        const pricePerDose = basePricePerDose + extraCostPerDose;
+        // Deduct cost proportionally (stock_total_cost already includes extras)
+        const costPerGram = state.coffee_stock_grams > 0 ? state.stock_total_cost / state.coffee_stock_grams : 0;
+        const costDeducted = costPerGram * doseGrams;
 
         await client.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [pricePerDose, user.id]);
         await client.query('INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, $3)', [user.id, -pricePerDose, 'consumption']);
 
         const newStock = state.coffee_stock_grams - doseGrams;
-        const newCost = state.stock_total_cost - basePricePerDose;
+        const newCost = Math.max(0, state.stock_total_cost - costDeducted);
         await client.query('UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2', [newStock, newCost]);
+
+        // Update stored dose price for next consumer
+        await computeAndStoreDosePrice(client);
 
         await client.query('COMMIT');
         res.json({ success: true, message: 'Coffee consumed!', new_balance: user.balance - pricePerDose, cost: pricePerDose });
