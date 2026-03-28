@@ -360,37 +360,80 @@ document.addEventListener('DOMContentLoaded', () => {
     // =====================
     //  SYSTEM STATE
     // =====================
+    function fmtR(v) { return parseFloat(v || 0).toFixed(2).replace('.', ','); }
+    function fmtR4(v) { return parseFloat(v || 0).toFixed(4).replace('.', ','); }
+
     async function loadSystemState() {
         try {
             const res = await fetch(`${API_URL}/system`);
             if (res.ok) {
                 const state = await res.json();
                 adminCurrentStock.textContent = `${parseFloat(state.coffee_stock_grams).toFixed(0)} g`;
-                adminDosePrice.textContent = `R$ ${parseFloat(state.current_price_per_dose).toFixed(2).replace('.', ',')}`;
+                adminDosePrice.textContent = `R$ ${fmtR(state.current_price_per_dose)}`;
 
                 const adjVirtualEl = document.getElementById('adjust-virtual-stock');
                 if (adjVirtualEl) adjVirtualEl.textContent = `${parseFloat(state.coffee_stock_grams).toFixed(0)} g`;
 
-                const extraTotalEl = document.getElementById('admin-extra-total');
-                if (extraTotalEl) extraTotalEl.textContent = `R$ ${parseFloat(state.extra_costs_total || 0).toFixed(2).replace('.', ',')}`;
+                // Render full calculation breakdown
+                const breakdownEl = document.getElementById('dose-calc-breakdown');
+                if (breakdownEl) {
+                    const totalGrams = parseFloat(state.total_purchased_grams || 0);
+                    const totalCost = parseFloat(state.total_purchase_cost || 0);
+                    const extraTotal = parseFloat(state.extra_costs_total || 0);
+                    const fullCost = totalCost + extraTotal;
+                    const costPerGram = parseFloat(state.cost_per_gram || 0);
+                    const basePpd = parseFloat(state.base_price_per_dose || 0);
+                    const extraPpd = parseFloat(state.extra_cost_per_dose || 0);
+                    const doseGrams = parseFloat(state.dose_grams || 10);
+                    const remainingDoses = parseInt(state.remaining_doses || 0);
+                    const totalConsumptions = parseInt(state.total_consumptions || 0);
+                    const currentPrice = parseFloat(state.current_price_per_dose || 0);
+                    const stockGrams = parseFloat(state.coffee_stock_grams || 0);
 
+                    breakdownEl.innerHTML = `
+                        <div style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.2); border-radius:10px; padding:14px; margin-top:12px; font-size:0.8rem; line-height:1.8;">
+                            <div style="font-weight:600; margin-bottom:8px; color:#f59e0b; font-size:0.85rem;">Como o preço da dose é calculado</div>
+
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Investimento total</div>
+                            <div style="display:flex; justify-content:space-between;"><span>Compras de café</span><span>R$ ${fmtR(totalCost)} / ${totalGrams.toFixed(0)}g</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>Custos extras (frete, etc.)</span><span style="color:#f59e0b;">+ R$ ${fmtR(extraTotal)}</span></div>
+                            <div style="display:flex; justify-content:space-between; font-weight:600; margin-top:2px;"><span>Custo total</span><span>R$ ${fmtR(fullCost)} / ${totalGrams.toFixed(0)}g</span></div>
+
+                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
+
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Fórmula</div>
+                            <div style="background:rgba(0,0,0,0.15); border-radius:6px; padding:8px 10px; font-family:monospace; font-size:0.78rem; margin-bottom:6px;">
+                                <div style="color:var(--text-muted);">custo/grama = R$ ${fmtR(fullCost)} ÷ ${totalGrams.toFixed(0)}g = <strong style="color:var(--text-primary);">R$ ${fmtR4(costPerGram)}/g</strong></div>
+                                <div style="color:var(--text-muted); margin-top:2px;">dose ${doseGrams.toFixed(0)}g × R$ ${fmtR4(costPerGram)} = <strong style="color:#f59e0b;">R$ ${fmtR(currentPrice)}</strong></div>
+                            </div>
+
+                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
+
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Composição por dose</div>
+                            <div style="display:flex; justify-content:space-between;"><span>Café</span><span>R$ ${fmtR4(basePpd)}</span></div>
+                            ${extraTotal > 0 ? `<div style="display:flex; justify-content:space-between;"><span>Extras</span><span style="color:#f59e0b;">+ R$ ${fmtR4(extraPpd)}</span></div>` : ''}
+                            <div style="display:flex; justify-content:space-between; font-weight:700; font-size:0.88rem; margin-top:4px; padding-top:4px; border-top:1px solid rgba(245,158,11,0.2);"><span>Preço final/dose</span><span style="color:#f59e0b;">R$ ${fmtR(currentPrice)}</span></div>
+
+                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
+
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Status</div>
+                            <div style="display:flex; justify-content:space-between;"><span>Estoque restante</span><span>${stockGrams.toFixed(0)}g (${remainingDoses} doses)</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>Doses consumidas</span><span>${totalConsumptions}</span></div>
+                        </div>`;
+                }
+
+                // Extra costs section info (simplified, since breakdown is above)
                 const dilutionEl = document.getElementById('extra-cost-dilution-info');
                 if (dilutionEl) {
                     const extraTotal = parseFloat(state.extra_costs_total || 0);
-                    const extraPerDose = parseFloat(state.extra_cost_per_dose || 0);
-                    const basePpd = parseFloat(state.base_price_per_dose || 0);
-
                     if (extraTotal <= 0) {
                         dilutionEl.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem; text-align:center; margin-top:10px;">Nenhum custo extra ativo.</p>';
                     } else {
+                        const extraPpd = parseFloat(state.extra_cost_per_dose || 0);
                         dilutionEl.innerHTML = `
-                            <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:8px; padding:12px; margin-top:10px; font-size:0.82rem; line-height:1.7;">
-                                <div style="font-weight:600; margin-bottom:6px; color:#f59e0b;">Composição do preço por dose</div>
-                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Total de custos extras</span><strong>R$ ${extraTotal.toFixed(2).replace('.', ',')}</strong></div>
-                                <hr style="border:none; border-top:1px solid rgba(245,158,11,0.2); margin:6px 0;">
-                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Custo base/dose (café)</span><span>R$ ${basePpd.toFixed(4).replace('.', ',')}</span></div>
-                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">+ Custo extra/dose</span><span style="color:#f59e0b;">+ R$ ${extraPerDose.toFixed(4).replace('.', ',')}</span></div>
-                                <div style="display:flex; justify-content:space-between; margin-top:4px; font-weight:700; font-size:0.88rem;"><span>Preço final/dose</span><span style="color:#f59e0b;">R$ ${(basePpd + extraPerDose).toFixed(2).replace('.', ',')}</span></div>
+                            <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:8px; padding:10px; margin-top:10px; font-size:0.8rem; line-height:1.6;">
+                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Total de custos extras</span><strong>R$ ${fmtR(extraTotal)}</strong></div>
+                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Impacto por dose</span><strong style="color:#f59e0b;">+ R$ ${fmtR4(extraPpd)}</strong></div>
                             </div>`;
                     }
                 }

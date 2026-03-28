@@ -117,7 +117,12 @@ app.get('/api/system', async (req, res) => {
             current_price_per_dose: priceData.currentPricePerDose,
             base_price_per_dose: priceData.basePricePerDose,
             extra_costs_total: priceData.extraTotal,
-            extra_cost_per_dose: priceData.extraCostPerDose
+            extra_cost_per_dose: priceData.extraCostPerDose,
+            cost_per_gram: priceData.costPerGram,
+            total_purchased_grams: priceData.totalPurchasedGrams,
+            total_purchase_cost: priceData.totalPurchaseCost,
+            remaining_doses: priceData.remainingDoses,
+            total_consumptions: priceData.totalConsumptions
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -204,17 +209,19 @@ async function recalculateStockState(client) {
 
 async function computeAndStoreDosePrice(clientOrPool) {
     const db = clientOrPool || pool;
-    const [stateResult, settingResult, extraResult, stockSumResult] = await Promise.all([
+    const [stateResult, settingResult, extraResult, stockSumResult, consResult] = await Promise.all([
         db.query('SELECT coffee_stock_grams, stock_total_cost FROM system_state ORDER BY id DESC LIMIT 1'),
         db.query("SELECT value FROM settings WHERE key = 'dose_grams'"),
         db.query('SELECT COALESCE(SUM(amount), 0) AS total FROM extra_costs'),
-        db.query('SELECT COALESCE(SUM(added_grams),0) AS tg, COALESCE(SUM(added_cost),0) AS tc FROM stock_history')
+        db.query('SELECT COALESCE(SUM(added_grams),0) AS tg, COALESCE(SUM(added_cost),0) AS tc FROM stock_history'),
+        db.query("SELECT COUNT(*) AS cnt FROM transactions WHERE type='consumption'")
     ]);
     const state = stateResult.rows[0] || { coffee_stock_grams: 0, stock_total_cost: 0 };
     const doseGrams = settingResult.rows.length ? parseFloat(settingResult.rows[0].value) : 10;
     const extraTotal = parseFloat(extraResult.rows[0].total);
     const totalPurchasedGrams = parseFloat(stockSumResult.rows[0].tg);
     const totalPurchaseCost = parseFloat(stockSumResult.rows[0].tc);
+    const totalConsumptions = parseInt(consResult.rows[0].cnt);
 
     // Price per dose from stock_total_cost (already includes extras after recalculate)
     let currentPricePerDose = 0;
@@ -225,16 +232,27 @@ async function computeAndStoreDosePrice(clientOrPool) {
     // Breakdown for display: base vs extras (computed from original tables)
     let basePricePerDose = 0;
     let extraCostPerDose = 0;
+    let costPerGram = 0;
     if (totalPurchasedGrams > 0) {
         const costPerGramPurchase = totalPurchaseCost / totalPurchasedGrams;
         const costPerGramExtra = extraTotal / totalPurchasedGrams;
+        costPerGram = (totalPurchaseCost + extraTotal) / totalPurchasedGrams;
         basePricePerDose = costPerGramPurchase * doseGrams;
         extraCostPerDose = costPerGramExtra * doseGrams;
     }
 
+    const remainingDoses = doseGrams > 0 ? Math.floor(state.coffee_stock_grams / doseGrams) : 0;
+
     await db.query('UPDATE system_state SET current_price_per_dose = $1', [currentPricePerDose]);
 
-    return { currentPricePerDose, basePricePerDose, extraCostPerDose, extraTotal, doseGrams };
+    return {
+        currentPricePerDose, basePricePerDose, extraCostPerDose,
+        extraTotal, doseGrams, costPerGram,
+        totalPurchasedGrams, totalPurchaseCost,
+        remainingStock: state.coffee_stock_grams,
+        remainingDoses,
+        totalConsumptions
+    };
 }
 
 app.put('/api/admin/stock-history/:id', requireAdmin, async (req, res) => {
