@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const { pool, initSchema } = require('./database');
+const { withTransaction, recalculate, applyConsumption } = require('./cost-engine');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -107,23 +108,23 @@ app.post('/api/admin/pin', requireAdmin, async (req, res) => {
 // =====================
 app.get('/api/system', async (req, res) => {
     try {
-        const priceData = await computeAndStoreDosePrice();
+        const calc = await recalculate(pool);
         const stateResult = await pool.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');
         const state = stateResult.rows.length ? stateResult.rows[0] : { coffee_stock_grams: 0, stock_total_cost: 0, qr_code_url: '', pix_key: '' };
 
         res.json({
             ...state,
-            dose_grams: priceData.doseGrams,
-            current_price_per_dose: priceData.currentPricePerDose,
-            base_price_per_dose: priceData.basePricePerDose,
-            extra_costs_total: priceData.extraTotal,
-            extra_cost_per_dose: priceData.extraCostPerDose,
-            remaining_extra_costs: priceData.remainingExtraCosts,
-            remaining_cost: priceData.remainingCost,
-            total_purchased_grams: priceData.totalPurchasedGrams,
-            total_purchase_cost: priceData.totalPurchaseCost,
-            remaining_doses: priceData.remainingDoses,
-            total_consumptions: priceData.totalConsumptions
+            dose_grams: calc.doseGrams,
+            current_price_per_dose: calc.currentPricePerDose,
+            base_price_per_dose: calc.basePricePerDose,
+            extra_costs_total: calc.extraTotal,
+            extra_cost_per_dose: calc.extraCostPerDose,
+            remaining_extra_costs: calc.remainingExtraCosts,
+            remaining_cost: calc.remainingPurchaseCost,
+            total_purchased_grams: calc.totalPurchasedGrams,
+            total_purchase_cost: calc.totalPurchaseCost,
+            remaining_doses: calc.remainingDoses,
+            total_consumptions: calc.totalConsumptions
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -134,34 +135,21 @@ app.get('/api/system', async (req, res) => {
 //  SYSTEM ADMIN ROUTES (PROTECTED)
 // =====================
 app.post('/api/system/stock', requireAdmin, async (req, res) => {
+    const { added_grams, added_cost } = req.body;
+    if (!added_grams || added_grams <= 0) return res.status(400).json({ error: "Invalid grams" });
+    const grams = parseFloat(added_grams);
+    const cost = parseFloat(added_cost || 0);
     try {
-        const { added_grams, added_cost } = req.body;
-        if (!added_grams || added_grams <= 0) return res.status(400).json({ error: "Invalid grams" });
-
-        const grams = parseFloat(added_grams);
-        const cost = parseFloat(added_cost || 0);
-
-        await pool.query('INSERT INTO stock_history (added_grams, added_cost) VALUES ($1, $2)', [grams, cost]);
-
-        // Recalculate full state (stock + cost including extras) and dose price
-        const client = await pool.connect();
-        try {
-            await client.query('BEGIN');
-            const { currentStock } = await recalculateStockState(client);
-            const priceData = await computeAndStoreDosePrice(client);
-            // Update price_per_dose on the just-inserted stock_history entry
+        const calc = await withTransaction(async (client) => {
+            await client.query('INSERT INTO stock_history (added_grams, added_cost) VALUES ($1, $2)', [grams, cost]);
+            const c = await recalculate(client);
             await client.query(
                 'UPDATE stock_history SET price_per_dose = $1 WHERE id = (SELECT MAX(id) FROM stock_history)',
-                [priceData.currentPricePerDose]
+                [c.currentPricePerDose]
             );
-            await client.query('COMMIT');
-            res.json({ success: true, message: "Stock updated successfully", newStock: currentStock });
-        } catch (innerErr) {
-            await client.query('ROLLBACK');
-            throw innerErr;
-        } finally {
-            client.release();
-        }
+            return c;
+        });
+        res.json({ success: true, message: "Stock updated successfully", newStock: calc.currentStock });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -183,132 +171,39 @@ app.get('/api/admin/stock-history', requireAdmin, async (req, res) => {
     }
 });
 
-async function recalculateStockState(client) {
-    const doseResult = await client.query("SELECT value FROM settings WHERE key = 'dose_grams'");
-    const doseGrams = doseResult.rows.length ? parseFloat(doseResult.rows[0].value) : 10;
-    const stockSum = await client.query(
-        'SELECT COALESCE(SUM(added_grams),0) AS tg, COALESCE(SUM(added_cost),0) AS tc FROM stock_history'
-    );
-    const totalPurchasedGrams = parseFloat(stockSum.rows[0].tg);
-    const totalPurchaseCost = parseFloat(stockSum.rows[0].tc);
-    const consResult = await client.query("SELECT COUNT(*) AS cnt FROM transactions WHERE type='consumption'");
-    const consumedGrams = parseInt(consResult.rows[0].cnt) * doseGrams;
-    const adjResult = await client.query(
-        'SELECT COALESCE(SUM(delta_grams),0) AS dg FROM stock_adjustments'
-    );
-    const adjGrams = parseFloat(adjResult.rows[0].dg);
-    const extraResult = await client.query('SELECT COALESCE(SUM(amount),0) AS total FROM extra_costs');
-    const extraTotal = parseFloat(extraResult.rows[0].total);
-
-    const currentStock = Math.max(0, totalPurchasedGrams - consumedGrams + adjGrams);
-
-    // Only consumption reduces cost (proportional to purchased grams).
-    // Adjustments do NOT change cost — losses make remaining stock more expensive,
-    // gains make it cheaper (sunk cost principle).
-    const consumedFraction = totalPurchasedGrams > 0 ? Math.min(1, consumedGrams / totalPurchasedGrams) : 0;
-    const remainingPurchaseCost = totalPurchaseCost * (1 - consumedFraction);
-
-    // Extra costs also consumed proportionally to doses consumed
-    const remainingExtraCosts = extraTotal * (1 - consumedFraction);
-
-    await client.query(
-        'UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2, remaining_extra_costs = $3',
-        [currentStock, remainingPurchaseCost, remainingExtraCosts]
-    );
-    return { currentStock, remainingPurchaseCost, remainingExtraCosts };
-}
-
-async function computeAndStoreDosePrice(clientOrPool) {
-    const db = clientOrPool || pool;
-    const [stateResult, settingResult, extraResult, stockSumResult, consResult] = await Promise.all([
-        db.query('SELECT coffee_stock_grams, stock_total_cost, remaining_extra_costs FROM system_state ORDER BY id DESC LIMIT 1'),
-        db.query("SELECT value FROM settings WHERE key = 'dose_grams'"),
-        db.query('SELECT COALESCE(SUM(amount), 0) AS total FROM extra_costs'),
-        db.query('SELECT COALESCE(SUM(added_grams),0) AS tg, COALESCE(SUM(added_cost),0) AS tc FROM stock_history'),
-        db.query("SELECT COUNT(*) AS cnt FROM transactions WHERE type='consumption'")
-    ]);
-    const state = stateResult.rows[0] || { coffee_stock_grams: 0, stock_total_cost: 0, remaining_extra_costs: 0 };
-    const doseGrams = settingResult.rows.length ? parseFloat(settingResult.rows[0].value) : 10;
-    const extraTotal = parseFloat(extraResult.rows[0].total);
-    const totalPurchasedGrams = parseFloat(stockSumResult.rows[0].tg);
-    const totalPurchaseCost = parseFloat(stockSumResult.rows[0].tc);
-    const totalConsumptions = parseInt(consResult.rows[0].cnt);
-    const remainingExtraCosts = parseFloat(state.remaining_extra_costs) || 0;
-    const stockGrams = parseFloat(state.coffee_stock_grams) || 0;
-    const stockCost = parseFloat(state.stock_total_cost) || 0;
-
-    // Base price: remaining purchase cost / remaining stock
-    let basePricePerDose = 0;
-    if (stockGrams > 0) {
-        basePricePerDose = (stockCost / stockGrams) * doseGrams;
-    }
-
-    // Extra price: remaining extras / remaining doses
-    const remainingDoses = doseGrams > 0 ? Math.floor(stockGrams / doseGrams) : 0;
-    let extraCostPerDose = 0;
-    if (remainingDoses > 0) {
-        extraCostPerDose = remainingExtraCosts / remainingDoses;
-    }
-
-    const currentPricePerDose = basePricePerDose + extraCostPerDose;
-
-    await db.query('UPDATE system_state SET current_price_per_dose = $1', [currentPricePerDose]);
-
-    return {
-        currentPricePerDose, basePricePerDose, extraCostPerDose,
-        extraTotal, remainingExtraCosts, doseGrams,
-        totalPurchasedGrams, totalPurchaseCost,
-        remainingStock: stockGrams,
-        remainingCost: stockCost,
-        remainingDoses,
-        totalConsumptions
-    };
-}
+// Calculation logic extracted to cost-engine.js
 
 app.put('/api/admin/stock-history/:id', requireAdmin, async (req, res) => {
     const { added_grams, added_cost, timestamp } = req.body;
     const grams = parseFloat(added_grams);
     const cost = parseFloat(added_cost || 0);
     if (isNaN(grams) || grams <= 0) return res.status(400).json({ error: 'Quantidade de gramas inválida.' });
-    const client = await pool.connect();
     try {
-        await client.query('BEGIN');
-        const exists = await client.query('SELECT id FROM stock_history WHERE id=$1', [req.params.id]);
-        if (exists.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Remessa não encontrada.' }); }
-        const tsClause = timestamp ? `, timestamp = $3` : '';
-        const params = timestamp ? [grams, cost, timestamp, req.params.id] : [grams, cost, req.params.id];
-        await client.query(
-            `UPDATE stock_history SET added_grams=$1, added_cost=$2${tsClause} WHERE id=$${params.length}`,
-            params
-        );
-        const { currentStock } = await recalculateStockState(client);
-        await computeAndStoreDosePrice(client);
-        await client.query('COMMIT');
-        res.json({ success: true, newStock: currentStock });
+        const calc = await withTransaction(async (client) => {
+            const exists = await client.query('SELECT id FROM stock_history WHERE id=$1', [req.params.id]);
+            if (exists.rows.length === 0) throw Object.assign(new Error('Remessa não encontrada.'), { status: 404 });
+            const tsClause = timestamp ? `, timestamp = $3` : '';
+            const params = timestamp ? [grams, cost, timestamp, req.params.id] : [grams, cost, req.params.id];
+            await client.query(`UPDATE stock_history SET added_grams=$1, added_cost=$2${tsClause} WHERE id=$${params.length}`, params);
+            return await recalculate(client);
+        });
+        res.json({ success: true, newStock: calc.currentStock });
     } catch (err) {
-        await client.query('ROLLBACK');
-        res.status(500).json({ error: err.message });
-    } finally {
-        client.release();
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 
 app.delete('/api/admin/stock-history/:id', requireAdmin, async (req, res) => {
-    const client = await pool.connect();
     try {
-        await client.query('BEGIN');
-        const exists = await client.query('SELECT id FROM stock_history WHERE id=$1', [req.params.id]);
-        if (exists.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Remessa não encontrada.' }); }
-        await client.query('DELETE FROM stock_history WHERE id=$1', [req.params.id]);
-        const { currentStock } = await recalculateStockState(client);
-        await computeAndStoreDosePrice(client);
-        await client.query('COMMIT');
-        res.json({ success: true, newStock: currentStock });
+        const calc = await withTransaction(async (client) => {
+            const exists = await client.query('SELECT id FROM stock_history WHERE id=$1', [req.params.id]);
+            if (exists.rows.length === 0) throw Object.assign(new Error('Remessa não encontrada.'), { status: 404 });
+            await client.query('DELETE FROM stock_history WHERE id=$1', [req.params.id]);
+            return await recalculate(client);
+        });
+        res.json({ success: true, newStock: calc.currentStock });
     } catch (err) {
-        await client.query('ROLLBACK');
-        res.status(500).json({ error: err.message });
-    } finally {
-        client.release();
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 
@@ -319,35 +214,24 @@ app.post('/api/admin/stock/adjust', requireAdmin, async (req, res) => {
     const { physical_grams, reason } = req.body;
     const physicalGrams = parseFloat(physical_grams);
     if (isNaN(physicalGrams) || physicalGrams < 0) return res.status(400).json({ error: 'Quantidade inválida.' });
-    const client = await pool.connect();
     try {
-        await client.query('BEGIN');
-        const stateResult = await client.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');
-        const state = stateResult.rows[0];
-        const currentGrams = parseFloat(state.coffee_stock_grams);
-        const currentCost  = parseFloat(state.stock_total_cost);
-        if (Math.abs(physicalGrams - currentGrams) < 0.01) {
-            await client.query('ROLLBACK');
-            return res.status(400).json({ error: 'Estoque físico igual ao virtual. Nenhum ajuste necessário.' });
-        }
-        const deltaGrams = physicalGrams - currentGrams;
-        // delta_cost is always 0: the purchase cost was already spent (sunk cost).
-        // A loss means fewer grams carry the same total cost → higher price per dose.
-        // A gain means more grams carry the same total cost → lower price per dose.
-        await client.query(
-            'INSERT INTO stock_adjustments (grams_before, grams_after, delta_grams, delta_cost, reason) VALUES ($1,$2,$3,$4,$5)',
-            [currentGrams, physicalGrams, deltaGrams, 0, reason || null]
-        );
-        // Recalculate full state from source of truth (includes adjustments)
-        await recalculateStockState(client);
-        await computeAndStoreDosePrice(client);
-        await client.query('COMMIT');
-        res.json({ success: true, grams_before: currentGrams, grams_after: physicalGrams, delta_grams: deltaGrams });
+        const result = await withTransaction(async (client) => {
+            const stateResult = await client.query('SELECT coffee_stock_grams FROM system_state ORDER BY id DESC LIMIT 1');
+            const currentGrams = parseFloat(stateResult.rows[0].coffee_stock_grams);
+            if (Math.abs(physicalGrams - currentGrams) < 0.01) {
+                throw Object.assign(new Error('Estoque físico igual ao virtual. Nenhum ajuste necessário.'), { status: 400 });
+            }
+            const deltaGrams = physicalGrams - currentGrams;
+            await client.query(
+                'INSERT INTO stock_adjustments (grams_before, grams_after, delta_grams, delta_cost, reason) VALUES ($1,$2,$3,$4,$5)',
+                [currentGrams, physicalGrams, deltaGrams, 0, reason || null]
+            );
+            await recalculate(client);
+            return { grams_before: currentGrams, grams_after: physicalGrams, delta_grams: deltaGrams };
+        });
+        res.json({ success: true, ...result });
     } catch (err) {
-        await client.query('ROLLBACK');
-        res.status(500).json({ error: err.message });
-    } finally {
-        client.release();
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 
@@ -374,40 +258,31 @@ app.post('/api/admin/extra-costs', requireAdmin, async (req, res) => {
     if (!description || !description.trim()) return res.status(400).json({ error: 'Descrição obrigatória.' });
     const amt = parseFloat(amount);
     if (isNaN(amt) || amt <= 0) return res.status(400).json({ error: 'Valor inválido.' });
-    const client = await pool.connect();
     try {
-        await client.query('BEGIN');
-        const result = await client.query(
-            'INSERT INTO extra_costs (description, amount) VALUES ($1, $2) RETURNING *',
-            [description.trim(), amt]
-        );
-        await recalculateStockState(client);
-        await computeAndStoreDosePrice(client);
-        await client.query('COMMIT');
-        res.json(result.rows[0]);
+        const row = await withTransaction(async (client) => {
+            const result = await client.query(
+                'INSERT INTO extra_costs (description, amount) VALUES ($1, $2) RETURNING *',
+                [description.trim(), amt]
+            );
+            await recalculate(client);
+            return result.rows[0];
+        });
+        res.json(row);
     } catch (err) {
-        await client.query('ROLLBACK');
         res.status(500).json({ error: err.message });
-    } finally {
-        client.release();
     }
 });
 
 app.delete('/api/admin/extra-costs/:id', requireAdmin, async (req, res) => {
-    const client = await pool.connect();
     try {
-        await client.query('BEGIN');
-        const result = await client.query('DELETE FROM extra_costs WHERE id=$1 RETURNING id', [req.params.id]);
-        if (result.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Custo não encontrado.' }); }
-        await recalculateStockState(client);
-        await computeAndStoreDosePrice(client);
-        await client.query('COMMIT');
+        await withTransaction(async (client) => {
+            const result = await client.query('DELETE FROM extra_costs WHERE id=$1 RETURNING id', [req.params.id]);
+            if (result.rows.length === 0) throw Object.assign(new Error('Custo não encontrado.'), { status: 404 });
+            await recalculate(client);
+        });
         res.json({ success: true });
     } catch (err) {
-        await client.query('ROLLBACK');
-        res.status(500).json({ error: err.message });
-    } finally {
-        client.release();
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 
@@ -581,62 +456,33 @@ app.get('/api/transactions/:matricula', async (req, res) => {
 });
 
 app.post('/api/consume', async (req, res) => {
-    const client = await pool.connect();
+    const { matricula } = req.body;
     try {
-        await client.query('BEGIN');
-        const { matricula } = req.body;
+        const result = await withTransaction(async (client) => {
+            const userResult = await client.query('SELECT * FROM users WHERE matricula = $1', [matricula]);
+            if (userResult.rows.length === 0) throw Object.assign(new Error('User not found'), { status: 404 });
+            const user = userResult.rows[0];
 
-        const userResult = await client.query('SELECT * FROM users WHERE matricula = $1', [matricula]);
-        if (userResult.rows.length === 0) {
-            await client.query('ROLLBACK');
-            return res.status(404).json({ error: 'User not found' });
-        }
-        const user = userResult.rows[0];
+            const stateResult = await client.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');
+            const state = stateResult.rows[0];
 
-        const stateResult = await client.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');
-        const state = stateResult.rows[0];
+            const settingResult = await client.query("SELECT value FROM settings WHERE key = $1", ['dose_grams']);
+            const doseGrams = settingResult.rows.length ? parseFloat(settingResult.rows[0].value) : 10;
 
-        const settingResult = await client.query("SELECT value FROM settings WHERE key = $1", ['dose_grams']);
-        const doseGrams = settingResult.rows.length ? parseFloat(settingResult.rows[0].value) : 10;
+            if (!state || state.coffee_stock_grams < doseGrams) {
+                throw Object.assign(new Error('Not enough coffee stock!'), { status: 400 });
+            }
 
-        if (!state || state.coffee_stock_grams < doseGrams) {
-            await client.query('ROLLBACK');
-            return res.status(400).json({ error: 'Not enough coffee stock!' });
-        }
+            const deduction = await applyConsumption(client, state, doseGrams);
 
-        // Use stored price (base + extras)
-        const pricePerDose = parseFloat(state.current_price_per_dose) || 0;
+            await client.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [deduction.priceCharged, user.id]);
+            await client.query('INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, $3)', [user.id, -deduction.priceCharged, 'consumption']);
 
-        // Deduct base cost from stock_total_cost (purchase cost only)
-        const baseCostPerGram = state.coffee_stock_grams > 0 ? state.stock_total_cost / state.coffee_stock_grams : 0;
-        const baseCostDeducted = baseCostPerGram * doseGrams;
-
-        // Deduct extra cost from remaining_extra_costs
-        const remainingExtras = parseFloat(state.remaining_extra_costs) || 0;
-        const remainingDoses = Math.floor(state.coffee_stock_grams / doseGrams);
-        const extraCostDeducted = remainingDoses > 0 ? remainingExtras / remainingDoses : 0;
-
-        await client.query('UPDATE users SET balance = balance - $1 WHERE id = $2', [pricePerDose, user.id]);
-        await client.query('INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, $3)', [user.id, -pricePerDose, 'consumption']);
-
-        const newStock = state.coffee_stock_grams - doseGrams;
-        const newCost = Math.max(0, state.stock_total_cost - baseCostDeducted);
-        const newExtras = Math.max(0, remainingExtras - extraCostDeducted);
-        await client.query(
-            'UPDATE system_state SET coffee_stock_grams = $1, stock_total_cost = $2, remaining_extra_costs = $3',
-            [newStock, newCost, newExtras]
-        );
-
-        // Update stored dose price for next consumer
-        await computeAndStoreDosePrice(client);
-
-        await client.query('COMMIT');
-        res.json({ success: true, message: 'Coffee consumed!', new_balance: user.balance - pricePerDose, cost: pricePerDose });
+            return { new_balance: user.balance - deduction.priceCharged, cost: deduction.priceCharged };
+        });
+        res.json({ success: true, message: 'Coffee consumed!', ...result });
     } catch (err) {
-        await client.query('ROLLBACK');
-        res.status(500).json({ error: err.message });
-    } finally {
-        client.release();
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 
@@ -680,53 +526,49 @@ app.put('/api/admin/transactions/:id', requireAdmin, async (req, res) => {
         return res.status(400).json({ error: 'Tipo inválido' });
     }
     const finalAmount = type === 'consumption' ? -Math.abs(parseFloat(amount)) : Math.abs(parseFloat(amount));
-    const client = await pool.connect();
     try {
-        await client.query('BEGIN');
-        const old = await client.query('SELECT user_id FROM transactions WHERE id = $1', [id]);
-        if (old.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Transação não encontrada' }); }
-        const oldUserId = old.rows[0].user_id;
-        await client.query(
-            'UPDATE transactions SET user_id=$1, type=$2, amount=$3, timestamp=$4 WHERE id=$5',
-            [user_id, type, finalAmount, timestamp, id]
-        );
-        const affectedUsers = [...new Set([parseInt(oldUserId), parseInt(user_id)])];
-        for (const uid of affectedUsers) {
+        await withTransaction(async (client) => {
+            const old = await client.query('SELECT user_id FROM transactions WHERE id = $1', [id]);
+            if (old.rows.length === 0) throw Object.assign(new Error('Transação não encontrada'), { status: 404 });
+            const oldUserId = old.rows[0].user_id;
             await client.query(
-                'UPDATE users SET balance = COALESCE((SELECT SUM(amount) FROM transactions WHERE user_id=$1), 0) WHERE id=$1',
-                [uid]
+                'UPDATE transactions SET user_id=$1, type=$2, amount=$3, timestamp=$4 WHERE id=$5',
+                [user_id, type, finalAmount, timestamp, id]
             );
-        }
-        await client.query('COMMIT');
+            const affectedUsers = [...new Set([parseInt(oldUserId), parseInt(user_id)])];
+            for (const uid of affectedUsers) {
+                await client.query(
+                    'UPDATE users SET balance = COALESCE((SELECT SUM(amount) FROM transactions WHERE user_id=$1), 0) WHERE id=$1',
+                    [uid]
+                );
+            }
+            // Recalculate stock since consumption count may have changed
+            await recalculate(client);
+        });
         res.json({ success: true });
     } catch (err) {
-        await client.query('ROLLBACK');
-        res.status(500).json({ error: err.message });
-    } finally {
-        client.release();
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 
 app.delete('/api/admin/transactions/:id', requireAdmin, async (req, res) => {
     const { id } = req.params;
-    const client = await pool.connect();
     try {
-        await client.query('BEGIN');
-        const old = await client.query('SELECT user_id FROM transactions WHERE id=$1', [id]);
-        if (old.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'Transação não encontrada' }); }
-        const userId = old.rows[0].user_id;
-        await client.query('DELETE FROM transactions WHERE id=$1', [id]);
-        await client.query(
-            'UPDATE users SET balance = COALESCE((SELECT SUM(amount) FROM transactions WHERE user_id=$1), 0) WHERE id=$1',
-            [userId]
-        );
-        await client.query('COMMIT');
+        await withTransaction(async (client) => {
+            const old = await client.query('SELECT user_id FROM transactions WHERE id=$1', [id]);
+            if (old.rows.length === 0) throw Object.assign(new Error('Transação não encontrada'), { status: 404 });
+            const userId = old.rows[0].user_id;
+            await client.query('DELETE FROM transactions WHERE id=$1', [id]);
+            await client.query(
+                'UPDATE users SET balance = COALESCE((SELECT SUM(amount) FROM transactions WHERE user_id=$1), 0) WHERE id=$1',
+                [userId]
+            );
+            // Recalculate stock since consumption count may have changed
+            await recalculate(client);
+        });
         res.json({ success: true });
     } catch (err) {
-        await client.query('ROLLBACK');
-        res.status(500).json({ error: err.message });
-    } finally {
-        client.release();
+        res.status(err.status || 500).json({ error: err.message });
     }
 });
 
