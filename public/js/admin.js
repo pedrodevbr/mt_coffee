@@ -476,16 +476,30 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             list.innerHTML = costs.map(c => {
                 const date = new Date(c.created_at).toLocaleDateString('pt-BR');
-                const amt = parseFloat(c.amount).toFixed(2).replace('.', ',');
-                return `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.07);">
-                    <div>
-                        <div style="font-weight:500; font-size:0.9rem;">${c.description}</div>
-                        <div style="color:var(--text-muted); font-size:0.78rem;">${date}</div>
+                const amt = parseFloat(c.amount);
+                const rem = parseFloat(c.remaining != null ? c.remaining : c.amount);
+                const absorbed = amt - rem;
+                const pctAbsorbed = amt > 0 ? Math.round((absorbed / amt) * 100) : 0;
+                return `<div style="padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.07);">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <div style="font-weight:500; font-size:0.9rem;">${c.description}</div>
+                            <div style="color:var(--text-muted); font-size:0.78rem;">${date}</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <span style="color:#f59e0b; font-weight:600;">R$ ${fmtR(amt)}</span>
+                            <button data-id="${c.id}" class="btn-del-extra"
+                                style="background:none; border:1px solid #ef4444; color:#f87171; border-radius:5px; padding:2px 8px; cursor:pointer; font-size:0.78rem;">✕</button>
+                        </div>
                     </div>
-                    <div style="display:flex; align-items:center; gap:10px;">
-                        <span style="color:#f59e0b; font-weight:600;">R$ ${amt}</span>
-                        <button data-id="${c.id}" class="btn-del-extra"
-                            style="background:none; border:1px solid #ef4444; color:#f87171; border-radius:5px; padding:2px 8px; cursor:pointer; font-size:0.78rem;">✕</button>
+                    <div style="margin-top:4px;">
+                        <div style="background:rgba(0,0,0,0.1); border-radius:3px; height:4px; overflow:hidden;">
+                            <div style="background:#f59e0b; height:100%; width:${pctAbsorbed}%; border-radius:3px;"></div>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-muted); margin-top:2px;">
+                            <span>${pctAbsorbed}% absorvido (R$ ${fmtR(absorbed)})</span>
+                            <span>restante: R$ ${fmtR(rem)}</span>
+                        </div>
                     </div>
                 </div>`;
             }).join('');

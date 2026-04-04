@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const { pool, initSchema } = require('./database');
-const { withTransaction, recalculate, applyConsumption } = require('./cost-engine');
+const { withTransaction, recalculate, recalculateWithExtrasReset, applyConsumption } = require('./cost-engine');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -261,7 +261,7 @@ app.post('/api/admin/extra-costs', requireAdmin, async (req, res) => {
     try {
         const row = await withTransaction(async (client) => {
             const result = await client.query(
-                'INSERT INTO extra_costs (description, amount) VALUES ($1, $2) RETURNING *',
+                'INSERT INTO extra_costs (description, amount, remaining) VALUES ($1, $2, $2) RETURNING *',
                 [description.trim(), amt]
             );
             await recalculate(client);
@@ -542,8 +542,8 @@ app.put('/api/admin/transactions/:id', requireAdmin, async (req, res) => {
                     [uid]
                 );
             }
-            // Recalculate stock since consumption count may have changed
-            await recalculate(client);
+            // Recalculate stock + reset extras remaining (consumption count changed)
+            await recalculateWithExtrasReset(client);
         });
         res.json({ success: true });
     } catch (err) {
@@ -563,8 +563,8 @@ app.delete('/api/admin/transactions/:id', requireAdmin, async (req, res) => {
                 'UPDATE users SET balance = COALESCE((SELECT SUM(amount) FROM transactions WHERE user_id=$1), 0) WHERE id=$1',
                 [userId]
             );
-            // Recalculate stock since consumption count may have changed
-            await recalculate(client);
+            // Recalculate stock + reset extras remaining (consumption count changed)
+            await recalculateWithExtrasReset(client);
         });
         res.json({ success: true });
     } catch (err) {

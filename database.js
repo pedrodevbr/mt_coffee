@@ -68,6 +68,13 @@ async function initSchema() {
         `);
 
         await client.query(`
+            ALTER TABLE extra_costs ADD COLUMN IF NOT EXISTS remaining REAL
+        `);
+        await client.query(`
+            UPDATE extra_costs SET remaining = amount WHERE remaining IS NULL
+        `);
+
+        await client.query(`
             CREATE TABLE IF NOT EXISTS stock_adjustments (
                 id SERIAL PRIMARY KEY,
                 grams_before REAL NOT NULL,
