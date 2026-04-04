@@ -25,14 +25,21 @@ async function withTransaction(callback) {
 
 async function gatherSourceData(db) {
     const [settingResult, stockSum, consResult, adjResult, extraResult] = await Promise.all([
-        db.query("SELECT value FROM settings WHERE key = 'dose_grams'"),
+        db.query("SELECT key, value FROM settings WHERE key IN ('dose_grams', 'extra_dilution_doses')"),
         db.query('SELECT COALESCE(SUM(added_grams),0) AS tg, COALESCE(SUM(added_cost),0) AS tc FROM stock_history'),
         db.query("SELECT COUNT(*) AS cnt FROM transactions WHERE type='consumption'"),
         db.query('SELECT COALESCE(SUM(delta_grams),0) AS dg FROM stock_adjustments'),
-        db.query('SELECT COALESCE(SUM(amount),0) AS total, COALESCE(SUM(remaining),0) AS total_remaining FROM extra_costs')
+        db.query(`SELECT COALESCE(SUM(amount),0) AS total,
+                         COALESCE(SUM(remaining),0) AS total_remaining,
+                         COALESCE(SUM(LEAST(remaining, amount / NULLIF(dilution_doses,0))),0) AS per_dose_total
+                  FROM extra_costs WHERE remaining > 0`)
     ]);
 
-    const doseGrams = settingResult.rows.length ? parseFloat(settingResult.rows[0].value) : 10;
+    const settings = {};
+    for (const row of settingResult.rows) settings[row.key] = row.value;
+
+    const doseGrams = parseFloat(settings.dose_grams) || 10;
+    const dilutionDoses = parseInt(settings.extra_dilution_doses) || 200;
     const totalPurchasedGrams = parseFloat(stockSum.rows[0].tg);
     const totalPurchaseCost = parseFloat(stockSum.rows[0].tc);
     const totalConsumptions = parseInt(consResult.rows[0].cnt);
@@ -40,10 +47,12 @@ async function gatherSourceData(db) {
     const adjGrams = parseFloat(adjResult.rows[0].dg);
     const extraTotal = parseFloat(extraResult.rows[0].total);
     const extraRemaining = parseFloat(extraResult.rows[0].total_remaining);
+    const extraPerDoseTotal = parseFloat(extraResult.rows[0].per_dose_total);
 
     return {
-        doseGrams, totalPurchasedGrams, totalPurchaseCost,
-        totalConsumptions, consumedGrams, adjGrams, extraTotal, extraRemaining
+        doseGrams, dilutionDoses, totalPurchasedGrams, totalPurchaseCost,
+        totalConsumptions, consumedGrams, adjGrams,
+        extraTotal, extraRemaining, extraPerDoseTotal
     };
 }
 
@@ -52,18 +61,17 @@ async function gatherSourceData(db) {
 // =====================
 
 function calculateState(data) {
-    const { doseGrams, totalPurchasedGrams, totalPurchaseCost, consumedGrams, adjGrams, extraTotal, extraRemaining, totalConsumptions } = data;
+    const {
+        doseGrams, totalPurchasedGrams, totalPurchaseCost,
+        consumedGrams, adjGrams, extraTotal, extraRemaining, extraPerDoseTotal,
+        totalConsumptions, dilutionDoses
+    } = data;
 
     const currentStock = Math.max(0, totalPurchasedGrams - consumedGrams + adjGrams);
 
-    // Only consumption reduces purchase cost. Adjustments do NOT (sunk cost):
-    // loss → fewer grams, same cost → higher price/dose
-    // gain → more grams, same cost → lower price/dose
+    // Only consumption reduces purchase cost. Adjustments do NOT (sunk cost).
     const consumedFraction = totalPurchasedGrams > 0 ? Math.min(1, consumedGrams / totalPurchasedGrams) : 0;
     const remainingPurchaseCost = totalPurchaseCost * (1 - consumedFraction);
-
-    // Extra costs: read directly from per-entry remaining (NOT derived from formula)
-    const remainingExtraCosts = extraRemaining;
 
     // Base price: remaining purchase cost / remaining stock × dose
     let basePricePerDose = 0;
@@ -71,19 +79,18 @@ function calculateState(data) {
         basePricePerDose = (remainingPurchaseCost / currentStock) * doseGrams;
     }
 
-    // Extra price: remaining extras / remaining doses
-    const remainingDoses = doseGrams > 0 ? Math.floor(currentStock / doseGrams) : 0;
-    let extraCostPerDose = 0;
-    if (remainingDoses > 0) {
-        extraCostPerDose = remainingExtraCosts / remainingDoses;
-    }
+    // Extra price: fixed per-dose from each active extra (amount / dilution_doses)
+    // extraPerDoseTotal = SUM( MIN(remaining, amount / dilution_doses) ) for active entries
+    const extraCostPerDose = extraPerDoseTotal;
 
+    const remainingDoses = doseGrams > 0 ? Math.floor(currentStock / doseGrams) : 0;
     const currentPricePerDose = basePricePerDose + extraCostPerDose;
 
     return {
-        currentStock, remainingPurchaseCost, remainingExtraCosts,
+        currentStock, remainingPurchaseCost,
+        remainingExtraCosts: extraRemaining,
         currentPricePerDose, basePricePerDose, extraCostPerDose,
-        remainingDoses, doseGrams, consumedFraction,
+        remainingDoses, doseGrams, dilutionDoses, consumedFraction,
         extraTotal, totalPurchasedGrams, totalPurchaseCost, totalConsumptions
     };
 }
@@ -113,50 +120,42 @@ async function recalculate(db) {
 }
 
 // =====================
-//  Recalculate with extras reset (for transaction edits that change consumption count)
+//  Recalculate with extras reset (for transaction edits)
 // =====================
 
 async function recalculateWithExtrasReset(db) {
-    // When consumption count changes (transaction edit/delete), we must
-    // redistribute the consumed fraction across all extra_costs entries.
+    // Rebuild remaining for each extra based on how many consumptions
+    // occurred since it was created.
+    // per_dose_charge = amount / dilution_doses
+    // doses_since = COUNT(consumptions after extra.created_at)
+    // remaining = MAX(0, amount - per_dose_charge * MIN(doses_since, dilution_doses))
+    await db.query(`
+        UPDATE extra_costs ec SET remaining = GREATEST(0,
+            ec.amount - (ec.amount / NULLIF(ec.dilution_doses, 0)) * LEAST(
+                COALESCE((SELECT COUNT(*) FROM transactions t
+                          WHERE t.type = 'consumption' AND t.timestamp >= ec.created_at), 0),
+                ec.dilution_doses
+            )
+        )
+    `);
+
     const data = await gatherSourceData(db);
-    const consumedFraction = data.totalPurchasedGrams > 0
-        ? Math.min(1, data.consumedGrams / data.totalPurchasedGrams) : 0;
-
-    await db.query(
-        'UPDATE extra_costs SET remaining = amount * (1 - $1)',
-        [consumedFraction]
-    );
-
-    // Re-gather now that remaining values are updated
-    const freshData = await gatherSourceData(db);
-    const calc = calculateState(freshData);
+    const calc = calculateState(data);
     await persistState(db, calc);
     return calc;
 }
 
 // =====================
-//  Deduct extras from individual entries (for consumption)
+//  Deduct extras for one consumption (fixed per-dose charge)
 // =====================
 
-async function deductExtrasForConsumption(client, totalDeduction) {
-    if (totalDeduction <= 0) return;
-
-    const result = await client.query('SELECT id, remaining FROM extra_costs WHERE remaining > 0');
-    const entries = result.rows;
-    if (entries.length === 0) return;
-
-    const totalRemaining = entries.reduce((sum, e) => sum + parseFloat(e.remaining), 0);
-    if (totalRemaining <= 0) return;
-
-    for (const entry of entries) {
-        const share = parseFloat(entry.remaining) / totalRemaining;
-        const deduction = Math.min(parseFloat(entry.remaining), totalDeduction * share);
-        await client.query(
-            'UPDATE extra_costs SET remaining = GREATEST(0, remaining - $1) WHERE id = $2',
-            [deduction, entry.id]
-        );
-    }
+async function deductExtrasForConsumption(client) {
+    // Each active extra deducts: MIN(remaining, amount / dilution_doses)
+    await client.query(`
+        UPDATE extra_costs
+        SET remaining = GREATEST(0, remaining - amount / NULLIF(dilution_doses, 0))
+        WHERE remaining > 0
+    `);
 }
 
 // =====================
@@ -172,16 +171,10 @@ async function applyConsumption(client, state, doseGrams) {
     const baseCostPerGram = stockGrams > 0 ? stockCost / stockGrams : 0;
     const baseCostDeducted = baseCostPerGram * doseGrams;
 
-    // Extra cost deduction (from per-entry remaining)
-    const extrasResult = await client.query('SELECT COALESCE(SUM(remaining),0) AS total FROM extra_costs');
-    const remainingExtras = parseFloat(extrasResult.rows[0].total);
-    const remainingDoses = Math.floor(stockGrams / doseGrams);
-    const extraCostDeducted = remainingDoses > 0 ? remainingExtras / remainingDoses : 0;
+    // Deduct fixed amount from each active extra_costs entry
+    await deductExtrasForConsumption(client);
 
-    // Deduct from individual extra_costs entries
-    await deductExtrasForConsumption(client, extraCostDeducted);
-
-    // Update system_state (base cost only — extras are in their own table)
+    // Update system_state base cost
     const newStock = stockGrams - doseGrams;
     const newCost = Math.max(0, stockCost - baseCostDeducted);
     await client.query(
@@ -189,10 +182,10 @@ async function applyConsumption(client, state, doseGrams) {
         [newStock, newCost]
     );
 
-    // Recalculate price for next consumer (reads fresh SUM(remaining) from extra_costs)
+    // Recalculate price for next consumer
     await recalculate(client);
 
-    return { priceCharged, baseCostDeducted, extraCostDeducted };
+    return { priceCharged, baseCostDeducted };
 }
 
 module.exports = {
