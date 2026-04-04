@@ -412,7 +412,7 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Fórmula da dose</div>
                             <div style="background:rgba(0,0,0,0.15); border-radius:6px; padding:8px 10px; font-family:monospace; font-size:0.78rem; margin-bottom:6px;">
                                 <div style="color:var(--text-muted);">base = R$ ${fmtR(remainingCost)} ÷ ${stockGrams.toFixed(0)}g × ${doseGrams.toFixed(0)}g = <strong style="color:var(--text-primary);">R$ ${fmtR4(basePpd)}</strong></div>
-                                ${remainingExtras > 0 ? `<div style="color:var(--text-muted); margin-top:2px;">extras = R$ ${fmtR(remainingExtras)} ÷ ${remainingDoses} doses = <strong style="color:#f59e0b;">R$ ${fmtR4(extraPpd)}</strong></div>` : ''}
+                                ${remainingExtras > 0 ? `<div style="color:var(--text-muted); margin-top:2px;">extras = soma fixa/dose dos custos ativos = <strong style="color:#f59e0b;">R$ ${fmtR4(extraPpd)}</strong></div>` : ''}
                                 <div style="color:var(--text-muted); margin-top:2px;">total = R$ ${fmtR4(basePpd)}${remainingExtras > 0 ? ` + R$ ${fmtR4(extraPpd)}` : ''} = <strong style="color:#f59e0b;">R$ ${fmtR(currentPrice)}</strong></div>
                             </div>
 
@@ -420,7 +420,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                             <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Composição por dose</div>
                             <div style="display:flex; justify-content:space-between;"><span>Café (R$ ${fmtR4(baseCostPerGram)}/g × ${doseGrams.toFixed(0)}g)</span><span>R$ ${fmtR4(basePpd)}</span></div>
-                            ${remainingExtras > 0 ? `<div style="display:flex; justify-content:space-between;"><span>Extras (R$ ${fmtR(remainingExtras)} ÷ ${remainingDoses} doses)</span><span style="color:#f59e0b;">+ R$ ${fmtR4(extraPpd)}</span></div>` : ''}
+                            ${remainingExtras > 0 ? `<div style="display:flex; justify-content:space-between;"><span>Extras (valor fixo/dose × ${parseInt(state.dilution_doses || 200)} doses)</span><span style="color:#f59e0b;">+ R$ ${fmtR4(extraPpd)}</span></div>` : ''}
                             <div style="display:flex; justify-content:space-between; font-weight:700; font-size:0.88rem; margin-top:4px; padding-top:4px; border-top:1px solid rgba(245,158,11,0.2);"><span>Preço final/dose</span><span style="color:#f59e0b;">R$ ${fmtR(currentPrice)}</span></div>
 
                             <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
@@ -478,13 +478,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 const date = new Date(c.created_at).toLocaleDateString('pt-BR');
                 const amt = parseFloat(c.amount);
                 const rem = parseFloat(c.remaining != null ? c.remaining : c.amount);
-                const absorbed = amt - rem;
-                const pctAbsorbed = amt > 0 ? Math.round((absorbed / amt) * 100) : 0;
-                return `<div style="padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.07);">
+                const dilDoses = parseInt(c.dilution_doses || 200);
+                const perDose = amt / dilDoses;
+                const dosesAbsorbed = perDose > 0 ? Math.round((amt - rem) / perDose) : 0;
+                const dosesLeft = Math.max(0, dilDoses - dosesAbsorbed);
+                const pctAbsorbed = amt > 0 ? Math.round(((amt - rem) / amt) * 100) : 0;
+                const isFullyAbsorbed = rem <= 0;
+                return `<div style="padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.07); ${isFullyAbsorbed ? 'opacity:0.5;' : ''}">
                     <div style="display:flex; justify-content:space-between; align-items:center;">
                         <div>
-                            <div style="font-weight:500; font-size:0.9rem;">${c.description}</div>
-                            <div style="color:var(--text-muted); font-size:0.78rem;">${date}</div>
+                            <div style="font-weight:500; font-size:0.9rem;">${c.description}${isFullyAbsorbed ? ' <span style="font-size:0.7rem; color:var(--success);">✓ absorvido</span>' : ''}</div>
+                            <div style="color:var(--text-muted); font-size:0.78rem;">${date} · R$ ${fmtR4(perDose)}/dose × ${dilDoses} doses</div>
                         </div>
                         <div style="display:flex; align-items:center; gap:10px;">
                             <span style="color:#f59e0b; font-weight:600;">R$ ${fmtR(amt)}</span>
@@ -497,8 +501,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             <div style="background:#f59e0b; height:100%; width:${pctAbsorbed}%; border-radius:3px;"></div>
                         </div>
                         <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-muted); margin-top:2px;">
-                            <span>${pctAbsorbed}% absorvido (R$ ${fmtR(absorbed)})</span>
-                            <span>restante: R$ ${fmtR(rem)}</span>
+                            <span>${dosesAbsorbed}/${dilDoses} doses (${pctAbsorbed}%)</span>
+                            <span>restante: R$ ${fmtR(rem)} em ${dosesLeft} doses</span>
                         </div>
                     </div>
                 </div>`;

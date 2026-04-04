@@ -124,7 +124,8 @@ app.get('/api/system', async (req, res) => {
             total_purchased_grams: calc.totalPurchasedGrams,
             total_purchase_cost: calc.totalPurchaseCost,
             remaining_doses: calc.remainingDoses,
-            total_consumptions: calc.totalConsumptions
+            total_consumptions: calc.totalConsumptions,
+            dilution_doses: calc.dilutionDoses
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -260,9 +261,11 @@ app.post('/api/admin/extra-costs', requireAdmin, async (req, res) => {
     if (isNaN(amt) || amt <= 0) return res.status(400).json({ error: 'Valor inválido.' });
     try {
         const row = await withTransaction(async (client) => {
+            const dilRes = await client.query("SELECT value FROM settings WHERE key = 'extra_dilution_doses'");
+            const dilutionDoses = dilRes.rows.length ? parseInt(dilRes.rows[0].value) : 200;
             const result = await client.query(
-                'INSERT INTO extra_costs (description, amount, remaining) VALUES ($1, $2, $2) RETURNING *',
-                [description.trim(), amt]
+                'INSERT INTO extra_costs (description, amount, remaining, dilution_doses) VALUES ($1, $2, $2, $3) RETURNING *',
+                [description.trim(), amt, dilutionDoses]
             );
             await recalculate(client);
             return result.rows[0];

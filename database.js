@@ -75,6 +75,10 @@ async function initSchema() {
         `);
 
         await client.query(`
+            ALTER TABLE extra_costs ADD COLUMN IF NOT EXISTS dilution_doses INTEGER DEFAULT 200
+        `);
+
+        await client.query(`
             CREATE TABLE IF NOT EXISTS stock_adjustments (
                 id SERIAL PRIMARY KEY,
                 grams_before REAL NOT NULL,
@@ -120,6 +124,11 @@ async function initSchema() {
         const settingCount = await client.query("SELECT COUNT(*) as count FROM settings WHERE key = 'dose_grams'");
         if (parseInt(settingCount.rows[0].count) === 0) {
             await client.query("INSERT INTO settings (key, value) VALUES ('dose_grams', '10')");
+        }
+
+        const dilutionCount = await client.query("SELECT COUNT(*) as count FROM settings WHERE key = 'extra_dilution_doses'");
+        if (parseInt(dilutionCount.rows[0].count) === 0) {
+            await client.query("INSERT INTO settings (key, value) VALUES ('extra_dilution_doses', '200')");
         }
 
         const pinCount = await client.query("SELECT COUNT(*) as count FROM settings WHERE key = 'admin_pin'");
