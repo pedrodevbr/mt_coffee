@@ -1,7 +1,7 @@
-# Deploy do MT Coffee na Railway
+# Deploy do MT Coffee — app na Railway, banco no Neon
 
-Custo esperado: plano Hobby US$5/mês, que já inclui US$5 de uso. App + Postgres
-pequenos costumam caber dentro disso.
+Custo esperado: US$5/mês do plano Hobby da Railway (que já inclui US$5 de uso).
+O banco fica no free tier do Neon: 0,5GB, e o dump tem 33MB.
 
 A ordem importa: **restaure o banco antes de subir o app**. O `initSchema()` do
 `database.js` é idempotente, mas o dump tem `CREATE TABLE` sem `IF NOT EXISTS` e
@@ -9,18 +9,34 @@ falha se as tabelas já existirem.
 
 ---
 
-## 0. Instalar o psql (uma vez)
+## 1. Restaurar o backup no Neon
 
-O dump usa `COPY` e o meta-comando `\restrict`, que só o `psql` entende.
+Precisa do `psql` (o dump usa `COPY` e o meta-comando `\restrict`). Se não tiver:
 
 ```bash
 winget install -e --id PostgreSQL.PostgreSQL.16
 ```
 
-Depois feche e reabra o terminal e confirme com `psql --version`. Se não achar o
-comando, adicione `C:\Program Files\PostgreSQL\16\bin` ao PATH.
+Conecte usando a connection string do painel do Neon:
 
-## 1. Login e projeto
+```bash
+psql "postgresql://USUARIO:SENHA@HOST.neon.tech/neondb?sslmode=require"
+```
+
+E, já dentro do prompt `neondb=>`, importe:
+
+```bash
+\i exports/database_backup.sql
+```
+
+Confira com `\dt` que apareceram `users`, `transactions`, `payment_receipts` e
+`coffees`. Depois `\q`.
+
+O aviso do Windows sobre code page 437 é cosmético: o próprio dump executa
+`SET client_encoding = 'UTF8'` antes de inserir dados, então os acentos entram
+corretos.
+
+## 2. Login e projeto na Railway
 
 ```bash
 railway login
@@ -30,52 +46,32 @@ railway login
 railway init --name mt-coffee
 ```
 
-## 2. Criar o Postgres
+## 3. Variáveis do app
+
+Use a **mesma** connection string do Neon do passo 1. Não há serviço Postgres
+dentro da Railway, então não existe referência `${{Postgres.DATABASE_URL}}`.
 
 ```bash
-railway add --database postgres
+railway variables --set 'DATABASE_URL=postgresql://USUARIO:SENHA@HOST.neon.tech/neondb?sslmode=require' --set 'JWT_SECRET=0e37faf187bc604b01f217c91d57dbc4a26dfae84a29d24f29f6dee3b832dfbe' --set 'NODE_ENV=production'
 ```
 
-## 3. Restaurar o backup
+O `database.js` liga SSL sozinho para qualquer host que não seja local, então a
+URL do Neon funciona sem ajuste.
 
-Pegue a URL pública do banco (a interna `.railway.internal` só funciona dentro da
-rede da Railway):
-
-```bash
-railway variables --service Postgres --kv
-```
-
-Copie o valor de `DATABASE_PUBLIC_URL` e restaure:
-
-```bash
-psql "COLE_A_DATABASE_PUBLIC_URL_AQUI" -f exports/database_backup.sql
-```
-
-Espere alguns minutos — são 33MB, quase tudo comprovante em `bytea`.
-
-## 4. Variáveis do app
-
-O `${{Postgres.DATABASE_URL}}` é uma referência da Railway: ela resolve sozinha
-para a URL interna, sem você colar credencial em lugar nenhum.
-
-```bash
-railway variables --set 'DATABASE_URL=${{Postgres.DATABASE_URL}}' --set 'JWT_SECRET=0e37faf187bc604b01f217c91d57dbc4a26dfae84a29d24f29f6dee3b832dfbe' --set 'NODE_ENV=production'
-```
-
-A chave da OpenAI (opcional — sem ela o upload de comprovante continua
-funcionando, só entra como pendente de aprovação manual):
+A chave da OpenAI é opcional — sem ela o upload de comprovante continua
+funcionando, só entra como pendente de aprovação manual:
 
 ```bash
 railway variables --set 'OPENAI_API_KEY=sk-SUA_CHAVE_AQUI'
 ```
 
-## 5. Subir
+## 4. Subir
 
 ```bash
 railway up
 ```
 
-## 6. Gerar o domínio público
+## 5. Gerar o domínio público
 
 ```bash
 railway domain
@@ -93,7 +89,13 @@ railway logs
 ```
 
 Você deve ver `Server running on http://localhost:...` e **não** deve ver o aviso
-`[auth] JWT_SECRET não definido`. Se aparecer, o passo 4 não pegou.
+`[auth] JWT_SECRET não definido`. Se aparecer, o passo 3 não pegou.
+
+## Observação sobre o Neon
+
+O free tier suspende o banco após alguns minutos sem uso. A primeira requisição
+depois disso paga um cold start de poucos segundos; as seguintes ficam normais.
+Se isso incomodar no uso diário, o Postgres da própria Railway não suspende.
 
 ## Rollback
 
