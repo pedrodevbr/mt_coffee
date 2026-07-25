@@ -1,0 +1,1958 @@
+document.addEventListener('DOMContentLoaded', () => {
+    const API_URL = '/api';
+    const TOKEN_KEY = 'mt_admin_token';
+
+    // =====================
+    //  AUTH HELPERS
+    // =====================
+    function getToken() {
+        return sessionStorage.getItem(TOKEN_KEY);
+    }
+
+    function saveToken(token) {
+        sessionStorage.setItem(TOKEN_KEY, token);
+    }
+
+    function clearToken() {
+        sessionStorage.removeItem(TOKEN_KEY);
+    }
+
+    function authHeaders() {
+        return {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${getToken()}`
+        };
+    }
+
+    async function authFetch(url, options = {}) {
+        const token = getToken();
+        const headers = { ...(options.headers || {}), 'Authorization': `Bearer ${token}` };
+        const res = await fetch(url, { ...options, headers });
+        if (res.status === 401 || res.status === 403) {
+            clearToken();
+            showLoginOverlay();
+        }
+        return res;
+    }
+
+    // =====================
+    //  LOGIN OVERLAY
+    // =====================
+    const overlay = document.getElementById('admin-login-overlay');
+    const pinInput = document.getElementById('pin-input');
+    const btnPinLogin = document.getElementById('btn-pin-login');
+    const pinError = document.getElementById('pin-error');
+
+    function showLoginOverlay() {
+        overlay.style.display = 'flex';
+        pinInput.value = '';
+        pinError.textContent = '';
+        setTimeout(() => pinInput.focus(), 100);
+    }
+
+    function hideLoginOverlay() {
+        overlay.style.display = 'none';
+    }
+
+    async function handlePinLogin(e) {
+        if (e) e.preventDefault();
+        const pin = pinInput.value.trim();
+        if (!pin) { pinError.textContent = 'Informe o PIN.'; return; }
+
+        btnPinLogin.disabled = true;
+        btnPinLogin.textContent = 'Verificando...';
+        pinError.textContent = '';
+
+        try {
+            const res = await fetch(`${API_URL}/admin/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pin })
+            });
+            const data = await res.json();
+            if (res.ok && data.token) {
+                saveToken(data.token);
+                hideLoginOverlay();
+                initAdminPanel();
+            } else {
+                pinError.textContent = data.error || 'PIN incorreto.';
+                pinInput.value = '';
+                pinInput.focus();
+            }
+        } catch {
+            pinError.textContent = 'Erro de conexão. Tente novamente.';
+        } finally {
+            btnPinLogin.disabled = false;
+            btnPinLogin.textContent = 'Entrar';
+        }
+    }
+
+    document.getElementById('pin-form').addEventListener('submit', handlePinLogin);
+
+    // Logout
+    document.getElementById('btn-logout').addEventListener('click', () => {
+        clearToken();
+        showLoginOverlay();
+    });
+
+    // =====================
+    //  CHANGE PIN MODAL
+    // =====================
+    const pinModal = document.getElementById('pin-modal');
+    const closePinModal = document.getElementById('close-pin-modal');
+    const currentPinInput = document.getElementById('current-pin');
+    const newPinInput = document.getElementById('new-pin');
+    const confirmPinInput = document.getElementById('confirm-pin');
+    const btnChangePin = document.getElementById('btn-change-pin');
+    const pinChangeMsg = document.getElementById('pin-change-msg');
+
+    document.getElementById('btn-open-pin-modal').addEventListener('click', () => {
+        currentPinInput.value = '';
+        newPinInput.value = '';
+        confirmPinInput.value = '';
+        pinChangeMsg.textContent = '';
+        pinModal.classList.remove('hidden');
+    });
+
+    closePinModal.addEventListener('click', () => pinModal.classList.add('hidden'));
+
+    btnChangePin.addEventListener('click', async () => {
+        const current_pin = currentPinInput.value.trim();
+        const new_pin = newPinInput.value.trim();
+        const confirm = confirmPinInput.value.trim();
+
+        if (!current_pin || !new_pin || !confirm) {
+            showMessage(pinChangeMsg, 'Preencha todos os campos.', true);
+            return;
+        }
+        if (new_pin !== confirm) {
+            showMessage(pinChangeMsg, 'Os PINs não coincidem.', true);
+            return;
+        }
+        if (new_pin.length < 4) {
+            showMessage(pinChangeMsg, 'O PIN deve ter ao menos 4 caracteres.', true);
+            return;
+        }
+
+        btnChangePin.disabled = true;
+        btnChangePin.textContent = 'Salvando...';
+        try {
+            const res = await authFetch(`${API_URL}/admin/pin`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ current_pin, new_pin })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                showMessage(pinChangeMsg, 'PIN alterado com sucesso!');
+                setTimeout(() => pinModal.classList.add('hidden'), 1500);
+            } else {
+                showMessage(pinChangeMsg, data.error || 'Erro ao alterar PIN.', true);
+            }
+        } catch {
+            showMessage(pinChangeMsg, 'Erro de conexão.', true);
+        } finally {
+            btnChangePin.disabled = false;
+            btnChangePin.textContent = 'Salvar novo PIN';
+        }
+    });
+
+    // =====================
+    //  ELEMENTS
+    // =====================
+    const adminCurrentStock = document.getElementById('admin-current-stock');
+    const adminDosePrice = document.getElementById('admin-dose-price');
+    const addGramsInput = document.getElementById('add-grams');
+    const addCostInput = document.getElementById('add-cost');
+    const btnAddStock = document.getElementById('btn-add-stock');
+    const stockMsg = document.getElementById('stock-msg');
+
+    const qrPreview = document.getElementById('admin-qr-preview');
+    const qrFileInput = document.getElementById('qr-file');
+    const btnUploadQr = document.getElementById('btn-upload-qr');
+    const qrMsg = document.getElementById('qr-msg');
+    const pixKeyInput = document.getElementById('pix-key-input');
+    const btnSavePix = document.getElementById('btn-save-pix');
+
+    const usersTbody = document.getElementById('users-tbody');
+    const btnNewUser = document.getElementById('btn-new-user');
+    const historyTbody = document.getElementById('history-tbody');
+
+    const receiptsTbody = document.getElementById('receipts-tbody');
+    const receiptsPendingBadge = document.getElementById('receipts-pending-badge');
+    const approveReceiptModal = document.getElementById('approve-receipt-modal');
+    const closeApproveModal = document.getElementById('close-approve-modal');
+    const approveReceiptId = document.getElementById('approve-receipt-id');
+    const approveUserName = document.getElementById('approve-user-name');
+    const approveDeclaredAmount = document.getElementById('approve-declared-amount');
+    const approveViewFile = document.getElementById('approve-view-file');
+    const approveFilePreview = document.getElementById('approve-file-preview');
+    const approveAmountInput = document.getElementById('approve-amount-input');
+    const approveMsg = document.getElementById('approve-msg');
+    const btnConfirmApprove = document.getElementById('btn-confirm-approve');
+    const btnConfirmReject = document.getElementById('btn-confirm-reject');
+
+    const txModal = document.getElementById('tx-modal');
+    const closeTxModal = document.getElementById('close-tx-modal');
+    const txEditId = document.getElementById('tx-edit-id');
+    const txEditUser = document.getElementById('tx-edit-user');
+    const txEditType = document.getElementById('tx-edit-type');
+    const txEditAmount = document.getElementById('tx-edit-amount');
+    const txEditTimestamp = document.getElementById('tx-edit-timestamp');
+    const txEditMsg = document.getElementById('tx-edit-msg');
+    const btnSaveTx = document.getElementById('btn-save-tx');
+    const btnDeleteTx = document.getElementById('btn-delete-tx');
+
+    const userModal = document.getElementById('user-modal');
+    const closeUserModal = document.getElementById('close-user-modal');
+    const newUserName = document.getElementById('new-user-name');
+    const newUserMatricula = document.getElementById('new-user-matricula');
+    const btnSaveUser = document.getElementById('btn-save-user');
+    const userMsg = document.getElementById('user-msg');
+    const userModalTitle = document.getElementById('user-modal-title');
+    const editUserId = document.getElementById('edit-user-id');
+    const newUserBalance = document.getElementById('new-user-balance');
+
+    let chartCount = null;
+    let chartValue = null;
+    let chartPrice = null;
+    let chartUserWeekly = null;
+    let chartBalance = null;
+
+    // =====================
+    //  INIT
+    // =====================
+    function initAdminPanel() {
+        loadSystemState();
+        loadUsers();
+        loadHistory();
+        loadStats();
+        loadStockHistory();
+        loadPriceHistory();
+        loadBalanceCard();
+        loadEquityCard();
+        loadReceipts();
+        loadExtraCosts();
+        loadAdjustments();
+        loadAnalysis();
+    }
+
+    // Check token on load
+    if (getToken()) {
+        hideLoginOverlay();
+        initAdminPanel();
+    } else {
+        showLoginOverlay();
+    }
+
+    // Events
+    btnAddStock.addEventListener('click', handleAddStock);
+    btnUploadQr.addEventListener('click', handleUploadQr);
+    btnSavePix.addEventListener('click', handleSavePix);
+
+    const btnSaveDoseGrams = document.getElementById('btn-save-dose-grams');
+    if (btnSaveDoseGrams) btnSaveDoseGrams.addEventListener('click', handleSaveDoseGrams);
+
+    btnNewUser.addEventListener('click', () => {
+        userModalTitle.textContent = 'Novo Usuário';
+        editUserId.value = '';
+        newUserName.value = '';
+        newUserMatricula.value = '';
+        newUserBalance.value = '0';
+        userMsg.textContent = '';
+        userModal.classList.remove('hidden');
+    });
+
+    closeUserModal.addEventListener('click', () => userModal.classList.add('hidden'));
+    btnSaveUser.addEventListener('click', handleSaveUser);
+
+
+    // =====================
+    //  ANALYTICS / STATS
+    // =====================
+    async function loadStats() {
+        try {
+            const [weeklyRes, avgRes] = await Promise.all([
+                authFetch(`${API_URL}/stats/weekly`),
+                authFetch(`${API_URL}/stats/daily-average`)
+            ]);
+            if (!weeklyRes.ok || !avgRes.ok) return;
+            const weekly = await weeklyRes.json();
+            const avg = await avgRes.json();
+            renderKPIs(avg);
+            renderWeeklyCharts(weekly);
+            renderTopUsers(avg.top_users_last_30_days);
+        } catch (err) {
+            console.error('Error loading stats:', err);
+        }
+    }
+
+    function renderKPIs(data) {
+        document.getElementById('kpi-avg-daily').textContent =
+            data.avg_daily_business_days > 0 ? data.avg_daily_business_days.toFixed(1) : '0';
+        document.getElementById('kpi-this-month').textContent = data.this_month_consumptions;
+        document.getElementById('kpi-total').textContent = data.total_consumptions_overall;
+        document.getElementById('kpi-days').textContent = data.total_business_days_with_consumption;
+
+        const fmtBRL = v => 'R$ ' + Math.abs(parseFloat(v || 0)).toFixed(2).replace('.', ',');
+        const pos = parseFloat(data.users_total_positive_credit || 0);
+        const neg = Math.abs(parseFloat(data.users_total_negative_credit || 0));
+        const net = pos - neg;
+        document.getElementById('kpi-credit-positive').textContent = fmtBRL(pos);
+        document.getElementById('kpi-credit-negative').textContent = fmtBRL(neg);
+        const netEl = document.getElementById('kpi-credit-net');
+        const netSubEl = document.getElementById('kpi-credit-net-sub');
+        if (net > 0) {
+            netEl.textContent = fmtBRL(net);
+            netEl.style.color = '#f87171';
+            netSubEl.textContent = 'passivo líquido (devido aos usuários)';
+        } else if (net < 0) {
+            netEl.textContent = fmtBRL(net);
+            netEl.style.color = '#4ade80';
+            netSubEl.textContent = 'ativo líquido (a receber dos usuários)';
+        } else {
+            netEl.textContent = 'R$ 0,00';
+            netEl.style.color = 'var(--text-primary)';
+            netSubEl.textContent = 'em equilíbrio';
+        }
+        document.getElementById('kpi-credit-positive-sub').textContent =
+            `${data.users_count_positive || 0} usuário${data.users_count_positive === 1 ? '' : 's'} com crédito`;
+        document.getElementById('kpi-credit-negative-sub').textContent =
+            `${data.users_count_negative || 0} usuário${data.users_count_negative === 1 ? '' : 's'} no negativo`;
+    }
+
+    function renderWeeklyCharts(rows) {
+        const labels = rows.map(r => 'Sem ' + r.label);
+        const counts = rows.map(r => parseInt(r.consumption_count));
+        const values = rows.map(r => parseFloat(r.total_consumed_value));
+
+        const gridColor = 'rgba(255,255,255,0.07)';
+        const tickColor = '#94a3b8';
+        const amber = '#f59e0b';
+        const blue = '#3b82f6';
+
+        const baseOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+                x: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: gridColor } },
+                y: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: gridColor }, beginAtZero: true }
+            }
+        };
+
+        if (chartCount) chartCount.destroy();
+        chartCount = new Chart(document.getElementById('chart-weekly-count'), {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{ data: counts, backgroundColor: `${amber}99`, borderColor: amber, borderWidth: 2, borderRadius: 6 }]
+            },
+            options: {
+                ...baseOptions,
+                plugins: { ...baseOptions.plugins, tooltip: { callbacks: { label: ctx => `${ctx.parsed.y} doses` } } }
+            }
+        });
+
+        if (chartValue) chartValue.destroy();
+        chartValue = new Chart(document.getElementById('chart-weekly-value'), {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [{ data: values, backgroundColor: `${blue}99`, borderColor: blue, borderWidth: 2, borderRadius: 6 }]
+            },
+            options: {
+                ...baseOptions,
+                plugins: { ...baseOptions.plugins, tooltip: { callbacks: { label: ctx => `R$ ${ctx.parsed.y.toFixed(2).replace('.', ',')}` } } },
+                scales: { ...baseOptions.scales, y: { ...baseOptions.scales.y, ticks: { color: tickColor, font: { size: 10 }, callback: v => `R$${v.toFixed(0)}` } } }
+            }
+        });
+    }
+
+    function renderTopUsers(users) {
+        const el = document.getElementById('top-users-list');
+        if (!users || users.length === 0) {
+            el.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">Nenhum usuário cadastrado.</p>';
+            return;
+        }
+        const counts = users.map(u => parseInt(u.consumption_count));
+        const max = counts.length ? Math.max(...counts) : 0;
+        const totalConsumers = counts.filter(c => c > 0).length;
+        const totalDoses = counts.reduce((s, c) => s + c, 0);
+        const headerHtml = `<p style="color: var(--text-muted); font-size: 0.78rem; margin-bottom: 12px;">
+            ${totalConsumers} de ${users.length} usuários consumiram (${totalDoses} doses no total)
+        </p>`;
+        el.innerHTML = headerHtml + users.map(u => {
+            const count = parseInt(u.consumption_count);
+            const pct = max > 0 ? (count / max) * 100 : 0;
+            const inactive = count === 0;
+            const opacity = inactive ? '0.45' : '1';
+            const countColor = inactive ? 'var(--text-muted)' : 'var(--text-primary)';
+            return `
+                <div class="top-user-row" style="opacity:${opacity};">
+                    <span class="top-user-name" title="${u.name}">${u.name.split(' ')[0]}</span>
+                    <div class="top-user-bar-wrap">
+                        <div class="top-user-bar" style="width: ${pct}%"></div>
+                    </div>
+                    <span class="top-user-count" style="color:${countColor};">${count}</span>
+                </div>`;
+        }).join('');
+    }
+
+    // =====================
+    //  SYSTEM STATE
+    // =====================
+    function fmtR(v) { return parseFloat(v || 0).toFixed(2).replace('.', ','); }
+    function fmtR4(v) { return parseFloat(v || 0).toFixed(4).replace('.', ','); }
+
+    async function loadSystemState() {
+        try {
+            const res = await fetch(`${API_URL}/system`);
+            if (res.ok) {
+                const state = await res.json();
+                adminCurrentStock.textContent = `${parseFloat(state.coffee_stock_grams).toFixed(0)} g`;
+                adminDosePrice.textContent = `R$ ${fmtR(state.current_price_per_dose)}`;
+
+                const adjVirtualEl = document.getElementById('adjust-virtual-stock');
+                if (adjVirtualEl) adjVirtualEl.textContent = `${parseFloat(state.coffee_stock_grams).toFixed(0)} g`;
+
+                // Render full calculation breakdown
+                const breakdownEl = document.getElementById('dose-calc-breakdown');
+                if (breakdownEl) {
+                    const totalGrams = parseFloat(state.total_purchased_grams || 0);
+                    const totalCost = parseFloat(state.total_purchase_cost || 0);
+                    const extraTotal = parseFloat(state.extra_costs_total || 0);
+                    const remainingExtras = parseFloat(state.remaining_extra_costs || 0);
+                    const remainingCost = parseFloat(state.remaining_cost || 0);
+                    const basePpd = parseFloat(state.base_price_per_dose || 0);
+                    const extraPpd = parseFloat(state.extra_cost_per_dose || 0);
+                    const doseGrams = parseFloat(state.dose_grams || 10);
+                    const remainingDoses = parseInt(state.remaining_doses || 0);
+                    const totalConsumptions = parseInt(state.total_consumptions || 0);
+                    const currentPrice = parseFloat(state.current_price_per_dose || 0);
+                    const stockGrams = parseFloat(state.coffee_stock_grams || 0);
+                    const baseCostPerGram = stockGrams > 0 ? remainingCost / stockGrams : 0;
+                    const extrasConsumed = extraTotal - remainingExtras;
+                    const extrasPercent = extraTotal > 0 ? Math.round((extrasConsumed / extraTotal) * 100) : 0;
+
+                    breakdownEl.innerHTML = `
+                        <div style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.2); border-radius:10px; padding:14px; margin-top:12px; font-size:0.8rem; line-height:1.8;">
+                            <div style="font-weight:600; margin-bottom:8px; color:#f59e0b; font-size:0.85rem;">Como o preço da dose é calculado</div>
+
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Investimento total (histórico)</div>
+                            <div style="display:flex; justify-content:space-between;"><span>Compras de café</span><span>R$ ${fmtR(totalCost)} / ${totalGrams.toFixed(0)}g</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>Custos extras (frete, etc.)</span><span style="color:#f59e0b;">R$ ${fmtR(extraTotal)}</span></div>
+
+                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
+
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Saldo restante no estoque</div>
+                            <div style="display:flex; justify-content:space-between;"><span>Custo café restante</span><span>R$ ${fmtR(remainingCost)} / ${stockGrams.toFixed(0)}g</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>Extras a diluir</span><span style="color:#f59e0b;">R$ ${fmtR(remainingExtras)} <span style="opacity:0.6; font-size:0.72rem;">(${extrasPercent}% absorvido)</span></span></div>
+
+                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
+
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Fórmula da dose</div>
+                            <div style="background:rgba(0,0,0,0.15); border-radius:6px; padding:8px 10px; font-family:monospace; font-size:0.78rem; margin-bottom:6px;">
+                                <div style="color:var(--text-muted);">base = R$ ${fmtR(remainingCost)} ÷ ${stockGrams.toFixed(0)}g × ${doseGrams.toFixed(0)}g = <strong style="color:var(--text-primary);">R$ ${fmtR4(basePpd)}</strong></div>
+                                ${remainingExtras > 0 ? `<div style="color:var(--text-muted); margin-top:2px;">extras = soma fixa/dose dos custos ativos = <strong style="color:#f59e0b;">R$ ${fmtR4(extraPpd)}</strong></div>` : ''}
+                                <div style="color:var(--text-muted); margin-top:2px;">total = R$ ${fmtR4(basePpd)}${remainingExtras > 0 ? ` + R$ ${fmtR4(extraPpd)}` : ''} = <strong style="color:#f59e0b;">R$ ${fmtR(currentPrice)}</strong></div>
+                            </div>
+
+                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
+
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Composição por dose</div>
+                            <div style="display:flex; justify-content:space-between;"><span>Café (R$ ${fmtR4(baseCostPerGram)}/g × ${doseGrams.toFixed(0)}g)</span><span>R$ ${fmtR4(basePpd)}</span></div>
+                            ${remainingExtras > 0 ? `<div style="display:flex; justify-content:space-between;"><span>Extras (valor fixo/dose × ${parseInt(state.dilution_doses || 200)} doses)</span><span style="color:#f59e0b;">+ R$ ${fmtR4(extraPpd)}</span></div>` : ''}
+                            <div style="display:flex; justify-content:space-between; font-weight:700; font-size:0.88rem; margin-top:4px; padding-top:4px; border-top:1px solid rgba(245,158,11,0.2);"><span>Preço final/dose</span><span style="color:#f59e0b;">R$ ${fmtR(currentPrice)}</span></div>
+
+                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
+
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Status</div>
+                            <div style="display:flex; justify-content:space-between;"><span>Estoque restante</span><span>${stockGrams.toFixed(0)}g (${remainingDoses} doses)</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>Doses consumidas</span><span>${totalConsumptions}</span></div>
+                        </div>`;
+                }
+
+                // Extra costs section info
+                const dilutionEl = document.getElementById('extra-cost-dilution-info');
+                if (dilutionEl) {
+                    const extraTotal = parseFloat(state.extra_costs_total || 0);
+                    const remainingExtras = parseFloat(state.remaining_extra_costs || 0);
+                    if (extraTotal <= 0) {
+                        dilutionEl.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem; text-align:center; margin-top:10px;">Nenhum custo extra ativo.</p>';
+                    } else {
+                        const extraPpd = parseFloat(state.extra_cost_per_dose || 0);
+                        const remainingDoses = parseInt(state.remaining_doses || 0);
+                        const absorbed = extraTotal - remainingExtras;
+                        const pct = Math.round((absorbed / extraTotal) * 100);
+                        dilutionEl.innerHTML = `
+                            <div style="background:rgba(245,158,11,0.08); border:1px solid rgba(245,158,11,0.25); border-radius:8px; padding:10px; margin-top:10px; font-size:0.8rem; line-height:1.6;">
+                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Total de custos extras</span><strong>R$ ${fmtR(extraTotal)}</strong></div>
+                                <div style="display:flex; justify-content:space-between;"><span style="color:var(--text-muted);">Restante a diluir</span><strong style="color:#f59e0b;">R$ ${fmtR(remainingExtras)}</strong></div>
+                                <div style="background:rgba(0,0,0,0.1); border-radius:4px; height:6px; margin:6px 0; overflow:hidden;">
+                                    <div style="background:#f59e0b; height:100%; width:${pct}%; border-radius:4px; transition:width 0.3s;"></div>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; font-size:0.72rem;"><span style="color:var(--text-muted);">${pct}% absorvido em ${parseInt(state.total_consumptions || 0)} doses</span><span style="color:var(--text-muted);">+R$ ${fmtR4(extraPpd)}/dose × ${remainingDoses} restantes</span></div>
+                            </div>`;
+                    }
+                }
+
+                if (state.qr_code_url) qrPreview.src = state.qr_code_url;
+                if (state.pix_key) pixKeyInput.value = state.pix_key;
+                const doseGramsInputEl = document.getElementById('dose-grams-input');
+                if (doseGramsInputEl && state.dose_grams != null) {
+                    doseGramsInputEl.value = parseFloat(state.dose_grams);
+                }
+            }
+        } catch (err) {
+            console.error('Error loading state:', err);
+        }
+    }
+
+    async function loadExtraCosts() {
+        const list = document.getElementById('extra-costs-list');
+        if (!list) return;
+        try {
+            const res = await authFetch(`${API_URL}/admin/extra-costs`);
+            if (!res.ok) return;
+            const costs = await res.json();
+            if (costs.length === 0) {
+                list.innerHTML = '<p style="color:var(--text-muted); font-size:0.85rem; text-align:center;">Nenhum custo extra registrado.</p>';
+                return;
+            }
+            list.innerHTML = costs.map(c => {
+                const date = new Date(c.created_at).toLocaleDateString('pt-BR');
+                const amt = parseFloat(c.amount);
+                const rem = parseFloat(c.remaining != null ? c.remaining : c.amount);
+                const dilDoses = parseInt(c.dilution_doses || 200);
+                const perDose = amt / dilDoses;
+                const dosesAbsorbed = perDose > 0 ? Math.round((amt - rem) / perDose) : 0;
+                const dosesLeft = Math.max(0, dilDoses - dosesAbsorbed);
+                const pctAbsorbed = amt > 0 ? Math.round(((amt - rem) / amt) * 100) : 0;
+                const isFullyAbsorbed = rem <= 0;
+                return `<div style="padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.07); ${isFullyAbsorbed ? 'opacity:0.5;' : ''}">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <div style="font-weight:500; font-size:0.9rem;">${c.description}${isFullyAbsorbed ? ' <span style="font-size:0.7rem; color:var(--success);">✓ absorvido</span>' : ''}</div>
+                            <div style="color:var(--text-muted); font-size:0.78rem;">${date} · R$ ${fmtR4(perDose)}/dose × ${dilDoses} doses</div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <span style="color:#f59e0b; font-weight:600;">R$ ${fmtR(amt)}</span>
+                            <button data-id="${c.id}" class="btn-del-extra"
+                                style="background:none; border:1px solid #ef4444; color:#f87171; border-radius:5px; padding:2px 8px; cursor:pointer; font-size:0.78rem;">✕</button>
+                        </div>
+                    </div>
+                    <div style="margin-top:4px;">
+                        <div style="background:rgba(0,0,0,0.1); border-radius:3px; height:4px; overflow:hidden;">
+                            <div style="background:#f59e0b; height:100%; width:${pctAbsorbed}%; border-radius:3px;"></div>
+                        </div>
+                        <div style="display:flex; justify-content:space-between; font-size:0.7rem; color:var(--text-muted); margin-top:2px;">
+                            <span>${dosesAbsorbed}/${dilDoses} doses (${pctAbsorbed}%)</span>
+                            <span>restante: R$ ${fmtR(rem)} em ${dosesLeft} doses</span>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+            list.querySelectorAll('.btn-del-extra').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    if (!confirm('Remover este custo extra?')) return;
+                    const r = await authFetch(`${API_URL}/admin/extra-costs/${btn.dataset.id}`, { method: 'DELETE', headers: authHeaders() });
+                    if (r.ok) { await loadExtraCosts(); await loadSystemState(); }
+                    else { const d = await r.json(); alert(d.error || 'Erro ao remover.'); }
+                });
+            });
+        } catch { list.innerHTML = '<p style="color:var(--danger); font-size:0.85rem;">Erro ao carregar custos.</p>'; }
+    }
+
+    const btnAddExtraCost = document.getElementById('btn-add-extra-cost');
+    if (btnAddExtraCost) {
+        btnAddExtraCost.addEventListener('click', async () => {
+            const desc = document.getElementById('extra-cost-desc').value.trim();
+            const amt = document.getElementById('extra-cost-amount').value;
+            const msgEl = document.getElementById('extra-cost-msg');
+            msgEl.textContent = '';
+            const res = await authFetch(`${API_URL}/admin/extra-costs`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ description: desc, amount: amt })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                document.getElementById('extra-cost-desc').value = '';
+                document.getElementById('extra-cost-amount').value = '';
+                msgEl.style.color = 'var(--success)';
+                msgEl.textContent = '✓ Custo adicionado!';
+                await loadExtraCosts();
+                await loadSystemState();
+                setTimeout(() => { msgEl.textContent = ''; }, 2500);
+            } else {
+                msgEl.style.color = '#f87171';
+                msgEl.textContent = data.error || 'Erro ao adicionar.';
+            }
+        });
+    }
+
+    // =====================
+    //  STOCK ADJUSTMENTS
+    // =====================
+    async function loadAdjustments() {
+        const list = document.getElementById('adjustments-list');
+        if (!list) return;
+        try {
+            const res = await authFetch(`${API_URL}/admin/stock/adjustments`);
+            if (!res.ok) return;
+            const rows = await res.json();
+            if (rows.length === 0) {
+                list.innerHTML = '<p style="color:var(--text-muted); font-size:0.82rem; text-align:center;">Nenhum acerto registrado.</p>';
+                return;
+            }
+            list.innerHTML = `
+                <p style="font-size:0.78rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Histórico de acertos</p>
+                ${rows.map(r => {
+                    const date = new Date(r.timestamp).toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit', year:'2-digit', hour:'2-digit', minute:'2-digit' });
+                    const delta = parseFloat(r.delta_grams);
+                    const sign = delta >= 0 ? '+' : '';
+                    const color = delta >= 0 ? '#22c55e' : '#f87171';
+                    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:7px 0; border-bottom:1px solid rgba(255,255,255,0.06); font-size:0.82rem;">
+                        <div>
+                            <div style="font-weight:500;">${parseFloat(r.grams_before).toFixed(0)} g → ${parseFloat(r.grams_after).toFixed(0)} g</div>
+                            <div style="color:var(--text-muted); font-size:0.76rem;">${date}${r.reason ? ' · ' + r.reason : ''}</div>
+                        </div>
+                        <span style="font-weight:700; color:${color};">${sign}${delta.toFixed(0)} g</span>
+                    </div>`;
+                }).join('')}`;
+        } catch { list.innerHTML = '<p style="color:var(--danger); font-size:0.82rem;">Erro ao carregar histórico.</p>'; }
+    }
+
+    const adjustPhysicalInput = document.getElementById('adjust-physical-grams');
+    const adjustPreview = document.getElementById('adjust-preview');
+
+    if (adjustPhysicalInput && adjustPreview) {
+        adjustPhysicalInput.addEventListener('input', () => {
+            const virtualEl = document.getElementById('adjust-virtual-stock');
+            const virtualGrams = parseFloat(virtualEl?.textContent) || 0;
+            const physicalGrams = parseFloat(adjustPhysicalInput.value);
+            if (isNaN(physicalGrams) || adjustPhysicalInput.value === '') {
+                adjustPreview.innerHTML = '';
+                return;
+            }
+            const delta = physicalGrams - virtualGrams;
+            const sign = delta >= 0 ? '+' : '';
+            const color = delta >= 0 ? '#22c55e' : '#f87171';
+            adjustPreview.innerHTML = `Diferença: <strong style="color:${color};">${sign}${delta.toFixed(0)} g</strong>`;
+        });
+    }
+
+    const btnApplyAdjustment = document.getElementById('btn-apply-adjustment');
+    if (btnApplyAdjustment) {
+        btnApplyAdjustment.addEventListener('click', async () => {
+            const physicalGrams = parseFloat(adjustPhysicalInput?.value);
+            const reason = document.getElementById('adjust-reason')?.value.trim();
+            const msgEl = document.getElementById('adjust-msg');
+            msgEl.textContent = '';
+            if (isNaN(physicalGrams) || physicalGrams < 0) {
+                msgEl.style.color = '#f87171';
+                msgEl.textContent = 'Informe o estoque físico real.';
+                return;
+            }
+            const res = await authFetch(`${API_URL}/admin/stock/adjust`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ physical_grams: physicalGrams, reason })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                adjustPhysicalInput.value = '';
+                if (document.getElementById('adjust-reason')) document.getElementById('adjust-reason').value = '';
+                if (adjustPreview) adjustPreview.innerHTML = '';
+                msgEl.style.color = 'var(--success)';
+                const delta = data.delta_grams;
+                const sign = delta >= 0 ? '+' : '';
+                msgEl.textContent = `✓ Acerto registrado: ${sign}${delta.toFixed(0)} g`;
+                await loadAdjustments();
+                await loadSystemState();
+                setTimeout(() => { msgEl.textContent = ''; }, 3000);
+            } else {
+                msgEl.style.color = '#f87171';
+                msgEl.textContent = data.error || 'Erro ao registrar acerto.';
+            }
+        });
+    }
+
+    async function loadStockHistory() {
+        const tbody = document.getElementById('stock-history-body');
+        if (!tbody) return;
+        try {
+            const res = await authFetch(`${API_URL}/admin/stock-history`);
+            if (!res.ok) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">Sem dados</td></tr>'; return; }
+            const rows = await res.json();
+            if (rows.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">Nenhuma remessa registrada ainda.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = rows.map(r => {
+                const date = new Date(r.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+                const costPer = parseFloat(r.cost_per_kg).toFixed(2).replace('.', ',');
+                const cost = parseFloat(r.added_cost).toFixed(2).replace('.', ',');
+                const price = parseFloat(r.price_per_dose || 0).toFixed(3).replace('.', ',');
+                const ts = new Date(r.timestamp).toISOString().slice(0, 16);
+                return `<tr>
+                    <td>${date}</td>
+                    <td>${parseFloat(r.added_grams).toFixed(0)} g</td>
+                    <td>R$ ${cost}</td>
+                    <td>R$ ${costPer}</td>
+                    <td>R$ ${price}</td>
+                    <td>
+                        <button class="btn-edit-remessa" data-id="${r.id}" data-grams="${r.added_grams}" data-cost="${r.added_cost}" data-ts="${ts}"
+                            style="background:none;border:1px solid rgba(255,255,255,0.2);color:var(--text-muted);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:0.78rem;margin-right:4px;">✏️</button>
+                        <button class="btn-del-remessa" data-id="${r.id}"
+                            style="background:none;border:1px solid #ef4444;color:#f87171;border-radius:5px;padding:2px 8px;cursor:pointer;font-size:0.78rem;">🗑</button>
+                    </td>
+                </tr>`;
+            }).join('');
+            tbody.querySelectorAll('.btn-edit-remessa').forEach(btn => {
+                btn.addEventListener('click', () => openEditRemessaModal(btn.dataset.id, btn.dataset.grams, btn.dataset.cost, btn.dataset.ts));
+            });
+            tbody.querySelectorAll('.btn-del-remessa').forEach(btn => {
+                btn.addEventListener('click', () => deleteRemessa(btn.dataset.id));
+            });
+        } catch (err) {
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--danger)">Erro ao carregar histórico</td></tr>';
+        }
+    }
+
+    function openEditRemessaModal(id, grams, cost, ts) {
+        document.getElementById('remessa-edit-id').value = id;
+        document.getElementById('remessa-edit-grams').value = parseFloat(grams).toFixed(0);
+        document.getElementById('remessa-edit-cost').value = parseFloat(cost).toFixed(2);
+        document.getElementById('remessa-edit-ts').value = ts;
+        document.getElementById('remessa-edit-msg').textContent = '';
+        document.getElementById('remessa-modal').classList.remove('hidden');
+    }
+
+    async function deleteRemessa(id) {
+        if (!confirm('Excluir esta remessa? O estoque será recalculado.')) return;
+        try {
+            const res = await authFetch(`${API_URL}/admin/stock-history/${id}`, { method: 'DELETE', headers: authHeaders() });
+            const data = await res.json();
+            if (res.ok) {
+                await loadStockHistory();
+                await loadSystemState();
+                await loadPriceHistory();
+                const sm = document.getElementById('stock-msg');
+                if (sm) { sm.style.color = 'var(--success)'; sm.textContent = `Remessa excluída. Estoque: ${data.newStock.toFixed(0)} g`; }
+            } else {
+                alert(data.error || 'Erro ao excluir remessa.');
+            }
+        } catch { alert('Erro de conexão.'); }
+    }
+
+    document.getElementById('btn-save-remessa').addEventListener('click', async () => {
+        const id = document.getElementById('remessa-edit-id').value;
+        const grams = document.getElementById('remessa-edit-grams').value;
+        const cost = document.getElementById('remessa-edit-cost').value;
+        const ts = document.getElementById('remessa-edit-ts').value;
+        const msgEl = document.getElementById('remessa-edit-msg');
+        msgEl.textContent = '';
+        try {
+            const res = await authFetch(`${API_URL}/admin/stock-history/${id}`, {
+                method: 'PUT',
+                headers: authHeaders(),
+                body: JSON.stringify({ added_grams: grams, added_cost: cost, timestamp: ts || undefined })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                document.getElementById('remessa-modal').classList.add('hidden');
+                await loadStockHistory();
+                await loadSystemState();
+                await loadPriceHistory();
+                const sm = document.getElementById('stock-msg');
+                if (sm) { sm.style.color = 'var(--success)'; sm.textContent = `Remessa atualizada. Estoque: ${data.newStock.toFixed(0)} g`; }
+            } else {
+                msgEl.style.color = '#f87171';
+                msgEl.textContent = data.error || 'Erro ao salvar.';
+            }
+        } catch { msgEl.style.color = '#f87171'; msgEl.textContent = 'Erro de conexão.'; }
+    });
+
+    document.getElementById('close-remessa-modal').addEventListener('click', () => {
+        document.getElementById('remessa-modal').classList.add('hidden');
+    });
+
+    async function loadPriceHistory() {
+        const canvas = document.getElementById('chart-price-history');
+        if (!canvas) return;
+        try {
+            const res = await authFetch(`${API_URL}/admin/price-history`);
+            if (!res.ok) return;
+            const rows = await res.json();
+            if (rows.length === 0) return;
+
+            const labels = rows.map(r => new Date(r.day).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }));
+            const prices = rows.map(r => parseFloat(parseFloat(r.price_per_dose || 0).toFixed(4)));
+
+            const gridColor = 'rgba(255,255,255,0.07)';
+            const tickColor = '#94a3b8';
+            const green = '#22c55e';
+
+            if (chartPrice) chartPrice.destroy();
+            chartPrice = new Chart(canvas, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Preço por dose (efetivo)',
+                        data: prices,
+                        borderColor: green,
+                        backgroundColor: `${green}22`,
+                        borderWidth: 2,
+                        pointBackgroundColor: green,
+                        pointRadius: 4,
+                        tension: 0.3,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { callbacks: { label: ctx => `R$ ${ctx.parsed.y.toFixed(3).replace('.', ',')}` } }
+                    },
+                    scales: {
+                        x: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: gridColor } },
+                        y: {
+                            ticks: { color: tickColor, font: { size: 10 }, callback: v => `R$${v.toFixed(2)}` },
+                            grid: { color: gridColor },
+                            beginAtZero: false
+                        }
+                    }
+                }
+            });
+        } catch (err) {
+            console.error('Error loading price history:', err);
+        }
+    }
+
+    async function loadBalanceCard() {
+        try {
+            const res = await authFetch(`${API_URL}/admin/stats/balance`);
+            if (!res.ok) return;
+            const d = await res.json();
+
+            const fmt = v => parseFloat(v).toFixed(2).replace('.', ',');
+
+            document.getElementById('bal-stock-cost').textContent = `R$ ${fmt(d.total_stock_cost)}`;
+            document.getElementById('bal-remessas-count').textContent = `${d.total_remessas} remessa${d.total_remessas !== 1 ? 's' : ''}`;
+            document.getElementById('bal-collected').textContent = `R$ ${fmt(d.total_recharged)}`;
+            document.getElementById('bal-consumptions-count').textContent = `${d.total_recharges_count} recarga${d.total_recharges_count !== 1 ? 's' : ''}`;
+            document.getElementById('bal-recharged').textContent = `R$ ${fmt(d.total_collected)}`;
+
+            const balEl = document.getElementById('bal-balance');
+            const bal = d.balance;
+            balEl.textContent = `R$ ${fmt(Math.abs(bal))}`;
+            balEl.style.color = bal >= 0 ? '#4ade80' : '#f87171';
+            document.getElementById('bal-balance-label').textContent = bal >= 0 ? 'superávit' : 'déficit';
+
+            if (d.total_stock_cost > 0) {
+                const pct = Math.min(100, (d.total_recharged / d.total_stock_cost) * 100);
+                document.getElementById('bal-coverage-pct').textContent = `${pct.toFixed(1)}%`;
+                document.getElementById('bal-coverage-bar').style.width = `${pct}%`;
+                document.getElementById('bal-coverage-bar').style.background =
+                    pct >= 100 ? '#4ade80' : pct >= 70 ? '#f59e0b' : '#f87171';
+                document.getElementById('bal-bar-wrap').style.display = 'block';
+            }
+
+            const gridColor = 'rgba(255,255,255,0.07)';
+            const tickColor = '#94a3b8';
+            const labels = d.weekly.map(r => 'Sem ' + r.label);
+            const collected = d.weekly.map(r => parseFloat(r.collected));
+            const cost = d.weekly.map(r => parseFloat(r.cost));
+
+            if (chartBalance) chartBalance.destroy();
+            chartBalance = new Chart(document.getElementById('chart-balance-weekly'), {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        { label: 'Arrecadado', data: collected, backgroundColor: '#4ade8099', borderColor: '#4ade80', borderWidth: 2, borderRadius: 5 },
+                        { label: 'Custo Remessa', data: cost,      backgroundColor: '#f8717199', borderColor: '#f87171', borderWidth: 2, borderRadius: 5 }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: true, labels: { color: tickColor, font: { size: 11 }, boxWidth: 12 } },
+                        tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: R$ ${ctx.parsed.y.toFixed(2).replace('.', ',')}` } }
+                    },
+                    scales: {
+                        x: { ticks: { color: tickColor, font: { size: 10 } }, grid: { color: gridColor } },
+                        y: { ticks: { color: tickColor, font: { size: 10 }, callback: v => `R$${v.toFixed(0)}` }, grid: { color: gridColor }, beginAtZero: true }
+                    }
+                }
+            });
+        } catch (err) {
+            console.error('Error loading balance card:', err);
+        }
+    }
+
+    async function loadEquityCard() {
+        try {
+            const res = await authFetch(`${API_URL}/admin/stats/equity`);
+            if (!res.ok) return;
+            const d = await res.json();
+            const m = d.momento;
+            const h = d.historico;
+
+            const fmt = v => 'R$ ' + parseFloat(v || 0).toFixed(2).replace('.', ',');
+            const setColored = (id, v) => {
+                const el = document.getElementById(id);
+                el.textContent = fmt(v);
+                el.style.color = parseFloat(v) >= 0 ? '#4ade80' : '#f87171';
+            };
+
+            // --- No Momento ---
+            document.getElementById('eq-stock').textContent = fmt(m.estoque);
+            document.getElementById('eq-stock-sub').textContent =
+                `${parseFloat(m.stock_grams || 0).toFixed(0)} g em estoque`;
+            setColored('eq-cash', m.caixa);
+            document.getElementById('eq-receivable').textContent = fmt(m.a_receber);
+            document.getElementById('eq-receivable-sub').textContent =
+                `${m.users_debt || 0} usuário${m.users_debt === 1 ? '' : 's'} no negativo`;
+            document.getElementById('eq-credits').textContent = fmt(m.creditos_devidos);
+            document.getElementById('eq-credits-sub').textContent =
+                `${m.users_credit || 0} usuário${m.users_credit === 1 ? '' : 's'} com crédito`;
+            document.getElementById('eq-assets').textContent = fmt(m.ativos_total);
+
+            const netEl = document.getElementById('eq-net');
+            const netSub = document.getElementById('eq-net-sub');
+            const net = parseFloat(m.patrimonio_liquido);
+            netEl.textContent = fmt(net);
+            netEl.style.color = net >= 0 ? '#4ade80' : '#f87171';
+            netSub.textContent = net >= 0 ? 'superávit (ativos − passivo)' : 'déficit (ativos − passivo)';
+
+            // --- Histórico ---
+            document.getElementById('eq-hist-recharged').textContent = fmt(h.total_arrecadado);
+            document.getElementById('eq-hist-recharges-sub').textContent =
+                `${h.recargas_count || 0} recarga${h.recargas_count === 1 ? '' : 's'}`;
+            document.getElementById('eq-hist-stock').textContent = fmt(h.total_remessas_cost);
+            document.getElementById('eq-hist-remessas-sub').textContent =
+                `${h.remessas_count || 0} remessa${h.remessas_count === 1 ? '' : 's'}`;
+            document.getElementById('eq-hist-extra').textContent = fmt(h.total_extra_cost);
+            document.getElementById('eq-hist-consumed').textContent = fmt(h.total_consumido);
+            document.getElementById('eq-hist-consumos-sub').textContent =
+                `${h.consumos_count || 0} consumo${h.consumos_count === 1 ? '' : 's'}`;
+        } catch (err) {
+            console.error('Error loading equity card:', err);
+        }
+    }
+
+    async function loadAnalysis() {
+        const tbody = document.getElementById('analise-tbody');
+        try {
+            const res = await authFetch(`${API_URL}/admin/stats/consumption-analysis`);
+            if (!res.ok) return;
+            const data = await res.json();
+            const r = data.resumo || {};
+
+            const setTxt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+            setTxt('an-risco-alto', r.risco_alto ?? 0);
+            setTxt('an-risco-medio', r.risco_medio ?? 0);
+            setTxt('an-ativos', r.ativos ?? 0);
+            setTxt('an-sem30', r.sem_registro_30d ?? 0);
+            setTxt('an-nunca', r.nunca_registraram ?? 0);
+
+            if (!tbody) return;
+            const usuarios = data.usuarios || [];
+            if (usuarios.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">Nenhum usuário.</td></tr>';
+                return;
+            }
+
+            const riscoBadge = {
+                alto:  '<span style="background:rgba(248,113,113,0.15); color:#f87171; padding:2px 9px; border-radius:10px; font-size:0.72rem; font-weight:700;">ALTO</span>',
+                medio: '<span style="background:rgba(251,191,36,0.15); color:#fbbf24; padding:2px 9px; border-radius:10px; font-size:0.72rem; font-weight:700;">MÉDIO</span>',
+                baixo: '<span style="background:rgba(74,222,128,0.15); color:#4ade80; padding:2px 9px; border-radius:10px; font-size:0.72rem; font-weight:700;">EM DIA</span>'
+            };
+
+            tbody.innerHTML = '';
+            usuarios.forEach(u => {
+                const tr = document.createElement('tr');
+                const dias = u.dias_desde_ultimo === null ? '—' : `${u.dias_desde_ultimo} d`;
+                const ritmo = u.ritmo_semanal === null ? '—' : u.ritmo_semanal.toString().replace('.', ',');
+                const esperado = u.esperado_30d === null ? '—' : u.esperado_30d;
+                const saldo = parseFloat(u.balance);
+                const saldoCor = saldo < 0 ? '#f87171' : (saldo > 0 ? '#4ade80' : 'var(--text-muted)');
+                tr.innerHTML = `
+                    <td>${riscoBadge[u.risco] || ''}</td>
+                    <td>${u.name}</td>
+                    <td>${u.matricula}</td>
+                    <td>${u.status}</td>
+                    <td>${dias}</td>
+                    <td>${u.consumos_30d}</td>
+                    <td>${ritmo}</td>
+                    <td>${esperado}</td>
+                    <td style="color:${saldoCor};">R$ ${saldo.toFixed(2).replace('.', ',')}</td>`;
+                tbody.appendChild(tr);
+            });
+        } catch (err) {
+            console.error('Error loading analysis:', err);
+            if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">Erro ao carregar análise.</td></tr>';
+        }
+    }
+
+    // =====================
+    //  RECEIPTS
+    // =====================
+    let allReceipts = [];
+    let currentReceiptFilter = 'pending';
+
+    async function loadReceipts() {
+        try {
+            const res = await authFetch(`${API_URL}/admin/receipts`);
+            if (!res.ok) return;
+            allReceipts = await res.json();
+            const pendingCount = allReceipts.filter(r => r.status === 'pending').length;
+            if (pendingCount > 0) {
+                receiptsPendingBadge.textContent = `${pendingCount} pendente${pendingCount > 1 ? 's' : ''}`;
+                receiptsPendingBadge.style.display = 'inline-block';
+            } else {
+                receiptsPendingBadge.style.display = 'none';
+            }
+            renderReceipts(currentReceiptFilter);
+        } catch (err) {
+            receiptsTbody.innerHTML = '<tr><td colspan="6">Erro ao carregar comprovantes.</td></tr>';
+        }
+    }
+
+    function renderReceipts(filter) {
+        currentReceiptFilter = filter;
+        const filtered = filter === 'all' ? allReceipts : allReceipts.filter(r => r.status === filter);
+        if (filtered.length === 0) {
+            receiptsTbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">Nenhum comprovante ${filter === 'pending' ? 'pendente' : filter === 'approved' ? 'aprovado' : filter === 'rejected' ? 'rejeitado' : ''}.</td></tr>`;
+            return;
+        }
+        const statusStyles = {
+            pending: ['⏳ Pendente', '#f59e0b'],
+            approved: ['✓ Aprovado', '#4ade80'],
+            rejected: ['✗ Rejeitado', '#f87171']
+        };
+        const confColors = { high: '#4ade80', medium: '#f59e0b', low: '#f87171' };
+        const confLabels = { high: 'Alta', medium: 'Média', low: 'Baixa' };
+        receiptsTbody.innerHTML = filtered.map(r => {
+            const [statusLabel, statusColor] = statusStyles[r.status] || ['--', '#fff'];
+            const date = new Date(r.created_at).toLocaleDateString('pt-BR');
+            const declared = r.amount_declared ? `<br><span style="font-size:0.74rem; color:var(--text-muted);">Declarado: R$ ${parseFloat(r.amount_declared).toFixed(2).replace('.', ',')}</span>` : '';
+            const approvedAmt = r.amount_approved ? `<br><span style="font-size:0.78rem; color:#4ade80;">Aprovado: R$ ${parseFloat(r.amount_approved).toFixed(2).replace('.', ',')}</span>` : '';
+            const noteCell = r.notes ? `<br><span style="font-size:0.78rem; color:#f87171;">${r.notes}</span>` : '';
+            const autoTag = r.reviewed_by === 'IA' ? `<br><span style="font-size:0.72rem; color:#a78bfa;">Auto (IA)</span>` : '';
+            let aiCell = '<span style="color:var(--text-muted); font-size:0.8rem;">—</span>';
+            if (r.ai_amount != null || r.ai_confidence || r.ai_summary) {
+                const amt = r.ai_amount != null ? `<strong>R$ ${parseFloat(r.ai_amount).toFixed(2).replace('.', ',')}</strong>` : '<span style="color:var(--text-muted);">valor não lido</span>';
+                const conf = r.ai_confidence ? `<span style="font-size:0.72rem; color:${confColors[r.ai_confidence] || '#fff'};">Confiança: ${confLabels[r.ai_confidence] || r.ai_confidence}</span>` : '';
+                const sum = r.ai_summary ? `<div style="font-size:0.72rem; color:var(--text-muted); max-width:240px; white-space:normal;">${r.ai_summary}</div>` : '';
+                aiCell = `<div style="font-size:0.82rem;">${amt}<br>${conf}${sum}</div>`;
+            }
+            const reviewBtn = r.status === 'pending'
+                ? `<button class="btn-review-receipt" data-id="${r.id}" data-user="${r.name}" data-file-type="${r.file_type || ''}" data-amount="${r.amount_declared || ''}" style="background:none; border:1px solid #f59e0b; color:#f59e0b; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:0.8rem;">Revisar</button>`
+                : `<button class="btn-view-receipt" data-id="${r.id}" data-file-type="${r.file_type || ''}" data-name="${r.file_name || 'comprovante'}" style="background:none; border:1px solid #60a5fa; color:#60a5fa; border-radius:6px; padding:3px 10px; cursor:pointer; font-size:0.8rem;">Ver</button>`;
+            return `<tr>
+                <td>${date}</td>
+                <td>${r.name}</td>
+                <td>${r.matricula}${declared}</td>
+                <td>${aiCell}</td>
+                <td style="color:${statusColor}; font-weight:600;">${statusLabel}${approvedAmt}${autoTag}${noteCell}</td>
+                <td>${reviewBtn}</td>
+            </tr>`;
+        }).join('');
+        receiptsTbody.querySelectorAll('.btn-review-receipt').forEach(btn => {
+            btn.addEventListener('click', () => openApproveModal(btn.dataset.id, btn.dataset.user, btn.dataset.fileType, btn.dataset.amount));
+        });
+        receiptsTbody.querySelectorAll('.btn-view-receipt').forEach(btn => {
+            btn.addEventListener('click', () => openViewReceipt(btn.dataset.id, btn.dataset.fileType));
+        });
+    }
+
+    function openViewReceipt(id, fileType) {
+        const fileUrl = `/api/admin/receipts/${id}/file?token=${getToken()}`;
+        window.open(fileUrl, '_blank', 'noopener');
+    }
+
+    document.querySelectorAll('[data-filter]').forEach(btn => {
+        btn.addEventListener('click', () => renderReceipts(btn.dataset.filter));
+    });
+
+    function openApproveModal(id, userName, fileType, declaredAmount) {
+        approveReceiptId.value = id;
+        approveUserName.textContent = userName;
+        approveAmountInput.value = declaredAmount ? parseFloat(declaredAmount).toFixed(2) : '';
+        approveMsg.textContent = '';
+
+        const amt = parseFloat(declaredAmount);
+        approveDeclaredAmount.textContent = (!isNaN(amt)) ? `R$ ${amt.toFixed(2).replace('.', ',')}` : '--';
+
+        const fileUrl = `/api/admin/receipts/${id}/file?token=${getToken()}`;
+        approveViewFile.href = fileUrl;
+
+        const isImage = fileType && fileType.startsWith('image/');
+        const isPdf   = fileType === 'application/pdf';
+
+        if (isImage) {
+            const img = document.createElement('img');
+            img.src = fileUrl;
+            img.alt = 'Comprovante';
+            img.style.cssText = 'max-width:100%; max-height:380px; object-fit:contain; border-radius:8px; display:block;';
+            img.onerror = () => {
+                approveFilePreview.innerHTML = '<span style="color:#f87171; font-size:0.85rem; padding:16px;">Arquivo não encontrado no servidor.</span>';
+            };
+            approveFilePreview.innerHTML = '';
+            approveFilePreview.appendChild(img);
+        } else if (isPdf) {
+            const obj = document.createElement('iframe');
+            obj.src = fileUrl;
+            obj.style.cssText = 'width:100%; height:380px; border:none; border-radius:8px; display:block;';
+            obj.title = 'Comprovante PDF';
+            approveFilePreview.innerHTML = '';
+            approveFilePreview.appendChild(obj);
+        } else {
+            approveFilePreview.innerHTML = `<span style="color:var(--text-muted); font-size:0.85rem; padding:16px;">Formato desconhecido. <a href="${fileUrl}" target="_blank" style="color:#60a5fa;">Clique aqui para abrir ↗</a></span>`;
+        }
+
+        approveReceiptModal.classList.remove('hidden');
+    }
+
+    closeApproveModal.addEventListener('click', () => approveReceiptModal.classList.add('hidden'));
+    approveReceiptModal.addEventListener('click', e => { if (e.target === approveReceiptModal) approveReceiptModal.classList.add('hidden'); });
+
+    btnConfirmApprove.addEventListener('click', async () => {
+        const id = approveReceiptId.value;
+        const amount = parseFloat(approveAmountInput.value);
+        if (isNaN(amount) || amount <= 0) {
+            approveMsg.style.color = '#f87171';
+            approveMsg.textContent = 'Informe um valor válido.';
+            return;
+        }
+        btnConfirmApprove.disabled = true;
+        btnConfirmApprove.textContent = 'Aprovando...';
+        try {
+            const res = await authFetch(`${API_URL}/admin/receipts/${id}/approve`, {
+                method: 'PUT',
+                headers: authHeaders(),
+                body: JSON.stringify({ amount_approved: amount })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                approveReceiptModal.classList.add('hidden');
+                loadReceipts();
+                loadUsers();
+                loadBalanceCard();
+                loadEquityCard();
+            } else {
+                approveMsg.style.color = '#f87171';
+                approveMsg.textContent = data.error || 'Erro ao aprovar.';
+            }
+        } catch {
+            approveMsg.style.color = '#f87171';
+            approveMsg.textContent = 'Erro de conexão.';
+        } finally {
+            btnConfirmApprove.disabled = false;
+            btnConfirmApprove.textContent = 'Confirmar Aprovação';
+        }
+    });
+
+    btnConfirmReject.addEventListener('click', async () => {
+        const notes = prompt('Motivo da rejeição (opcional):');
+        if (notes === null) return;
+        const id = approveReceiptId.value;
+        try {
+            const res = await authFetch(`${API_URL}/admin/receipts/${id}/reject`, {
+                method: 'PUT',
+                headers: authHeaders(),
+                body: JSON.stringify({ notes: notes || null })
+            });
+            if (res.ok) {
+                approveReceiptModal.classList.add('hidden');
+                loadReceipts();
+            }
+        } catch {}
+    });
+
+    async function handleSavePix() {
+        const pix_key = pixKeyInput.value.trim();
+        btnSavePix.disabled = true;
+        btnSavePix.textContent = 'Salvando...';
+        try {
+            const res = await authFetch(`${API_URL}/system/pix`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ pix_key })
+            });
+            showMessage(qrMsg, res.ok ? 'Chave PIX atualizada!' : 'Erro ao salvar chave', !res.ok);
+        } catch {
+            showMessage(qrMsg, 'Erro de conexão', true);
+        } finally {
+            btnSavePix.disabled = false;
+            btnSavePix.textContent = 'Salvar Chave PIX';
+        }
+    }
+
+    async function handleSaveDoseGrams() {
+        const input = document.getElementById('dose-grams-input');
+        const msg = document.getElementById('dose-grams-msg');
+        const btn = document.getElementById('btn-save-dose-grams');
+        const dose = parseFloat(input.value);
+        if (isNaN(dose) || dose <= 0 || dose > 100) {
+            showMessage(msg, 'Informe um valor entre 0,1 e 100 gramas.', true);
+            return;
+        }
+        btn.disabled = true;
+        btn.textContent = 'Salvando...';
+        try {
+            const res = await authFetch(`${API_URL}/system/dose-grams`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ dose_grams: dose })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showMessage(msg, `Salvo! Cada dose agora usa ${dose}g.`);
+                await loadSystemState();
+            } else {
+                showMessage(msg, data.error || 'Erro ao salvar.', true);
+            }
+        } catch {
+            showMessage(msg, 'Erro de conexão', true);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Salvar';
+        }
+    }
+
+    async function handleUploadQr() {
+        const file = qrFileInput.files[0];
+        if (!file) { showMessage(qrMsg, 'Selecione uma imagem primeiro.', true); return; }
+
+        const formData = new FormData();
+        formData.append('qr_image', file);
+        btnUploadQr.disabled = true;
+        btnUploadQr.textContent = 'Enviando...';
+        try {
+            const res = await authFetch(`${API_URL}/system/qr`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${getToken()}` },
+                body: formData
+            });
+            if (res.ok) {
+                showMessage(qrMsg, 'QR Code salvo!');
+                qrFileInput.value = '';
+                loadSystemState();
+            } else {
+                const data = await res.json();
+                showMessage(qrMsg, data.error || 'Erro no upload', true);
+            }
+        } catch {
+            showMessage(qrMsg, 'Erro de conexão', true);
+        } finally {
+            btnUploadQr.disabled = false;
+            btnUploadQr.textContent = 'Salvar QR Code';
+        }
+    }
+
+    // =====================
+    //  USERS
+    // =====================
+    async function loadUsers() {
+        try {
+            const res = await authFetch(`${API_URL}/users`);
+            if (res.ok) renderUsers(await res.json());
+        } catch {
+            usersTbody.innerHTML = '<tr><td colspan="4">Erro ao carregar usuários.</td></tr>';
+        }
+    }
+
+    function renderUsers(users) {
+        cachedUsers = users;
+        usersTbody.innerHTML = '';
+        if (users.length === 0) {
+            usersTbody.innerHTML = '<tr><td colspan="4" style="text-align:center">Nenhum usuário cadastrado.</td></tr>';
+            return;
+        }
+        users.forEach(user => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${user.name}</td>
+                <td>${user.matricula}</td>
+                <td>R$ ${parseFloat(user.balance).toFixed(2).replace('.', ',')}</td>
+                <td>
+                    <button onclick="openUserSummary(${user.id})" style="padding: 4px 10px; font-size: 0.8rem; color: #a78bfa; cursor: pointer; background: transparent; border-radius: 6px; border: 1px solid #a78bfa; margin-right: 5px;">Ver</button>
+                    <button onclick="editUser(${user.id}, '${user.name.replace(/'/g, "\\'")}', '${user.matricula}', ${user.balance})" style="padding: 4px 10px; font-size: 0.8rem; color: var(--secondary-color); cursor: pointer; background: transparent; border-radius: 6px; border: 1px solid var(--secondary-color); margin-right: 5px;">Editar</button>
+                    <button onclick="deleteUser(${user.id})" style="padding: 4px 10px; font-size: 0.8rem; color: var(--danger); cursor: pointer; background: transparent; border-radius: 6px; border: 1px solid var(--danger);">Excluir</button>
+                </td>`;
+            usersTbody.appendChild(tr);
+        });
+    }
+
+    // =====================
+    //  HISTORY
+    // =====================
+    async function loadHistory() {
+        try {
+            const res = await authFetch(`${API_URL}/transactions`);
+            if (res.ok) renderHistory(await res.json());
+        } catch {
+            historyTbody.innerHTML = '<tr><td colspan="5">Erro ao carregar histórico.</td></tr>';
+        }
+    }
+
+    function renderHistory(transactions) {
+        historyTbody.innerHTML = '';
+        if (transactions.length === 0) {
+            historyTbody.innerHTML = '<tr><td colspan="6" style="text-align:center">Nenhuma transação registrada.</td></tr>';
+            return;
+        }
+        transactions.forEach(t => {
+            const tr = document.createElement('tr');
+            const date = new Date(t.timestamp).toLocaleString('pt-BR');
+            const isRecharge = t.type === 'recharge';
+            tr.innerHTML = `
+                <td>${date}</td>
+                <td>${t.name}</td>
+                <td>${t.matricula}</td>
+                <td>${isRecharge ? 'Recarga' : 'Consumo'}</td>
+                <td style="color: ${isRecharge ? 'var(--success)' : '#fff'}">${isRecharge ? '+' : '-'} R$ ${Math.abs(t.amount).toFixed(2).replace('.', ',')}</td>
+                <td style="text-align:center;">
+                    <button class="btn-edit-tx" data-id="${t.id}" data-user="${t.user_id}" data-type="${t.type}" data-amount="${Math.abs(t.amount)}" data-ts="${t.timestamp}" title="Editar" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:1rem;padding:2px 6px;border-radius:5px;transition:color .2s;">✏️</button>
+                </td>`;
+            historyTbody.appendChild(tr);
+        });
+        historyTbody.querySelectorAll('.btn-edit-tx').forEach(btn => {
+            btn.addEventListener('click', () => openTxModal(btn.dataset));
+        });
+    }
+
+    let cachedUsers = [];
+
+    function openTxModal(data) {
+        txEditId.value = data.id;
+        txEditType.value = data.type;
+        txEditAmount.value = parseFloat(data.amount).toFixed(2);
+        const localDt = new Date(data.ts);
+        localDt.setMinutes(localDt.getMinutes() - localDt.getTimezoneOffset());
+        txEditTimestamp.value = localDt.toISOString().slice(0, 16);
+        txEditMsg.textContent = '';
+
+        txEditUser.innerHTML = '<option value="">Selecionar usuário...</option>';
+        cachedUsers.forEach(u => {
+            const opt = document.createElement('option');
+            opt.value = u.id;
+            opt.textContent = `${u.name} (${u.matricula})`;
+            if (String(u.id) === String(data.user)) opt.selected = true;
+            txEditUser.appendChild(opt);
+        });
+
+        txModal.classList.remove('hidden');
+    }
+
+    closeTxModal.addEventListener('click', () => txModal.classList.add('hidden'));
+    txModal.addEventListener('click', e => { if (e.target === txModal) txModal.classList.add('hidden'); });
+
+    btnSaveTx.addEventListener('click', async () => {
+        const id = txEditId.value;
+        const user_id = txEditUser.value;
+        const type = txEditType.value;
+        const amount = parseFloat(txEditAmount.value);
+        const timestamp = txEditTimestamp.value;
+        if (!user_id || !timestamp || isNaN(amount) || amount <= 0) {
+            txEditMsg.style.color = '#f87171';
+            txEditMsg.textContent = 'Preencha todos os campos corretamente.';
+            return;
+        }
+        btnSaveTx.disabled = true;
+        btnSaveTx.textContent = 'Salvando...';
+        try {
+            const res = await authFetch(`${API_URL}/admin/transactions/${id}`, {
+                method: 'PUT',
+                headers: authHeaders(),
+                body: JSON.stringify({ user_id: parseInt(user_id), type, amount, timestamp })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                txModal.classList.add('hidden');
+                loadHistory();
+                loadUsers();
+                loadBalanceCard();
+                loadEquityCard();
+            } else {
+                txEditMsg.style.color = '#f87171';
+                txEditMsg.textContent = data.error || 'Erro ao salvar.';
+            }
+        } catch {
+            txEditMsg.style.color = '#f87171';
+            txEditMsg.textContent = 'Erro de conexão.';
+        } finally {
+            btnSaveTx.disabled = false;
+            btnSaveTx.textContent = 'Salvar';
+        }
+    });
+
+    btnDeleteTx.addEventListener('click', async () => {
+        if (!confirm('Excluir esta transação? O saldo do usuário será recalculado.')) return;
+        const id = txEditId.value;
+        btnDeleteTx.disabled = true;
+        try {
+            const res = await authFetch(`${API_URL}/admin/transactions/${id}`, { method: 'DELETE' });
+            if (res.ok) {
+                txModal.classList.add('hidden');
+                loadHistory();
+                loadUsers();
+                loadBalanceCard();
+                loadEquityCard();
+            } else {
+                const d = await res.json();
+                txEditMsg.style.color = '#f87171';
+                txEditMsg.textContent = d.error || 'Erro ao excluir.';
+            }
+        } catch {
+            txEditMsg.style.color = '#f87171';
+            txEditMsg.textContent = 'Erro de conexão.';
+        } finally {
+            btnDeleteTx.disabled = false;
+        }
+    });
+
+    // =====================
+    //  STOCK
+    // =====================
+    async function handleAddStock() {
+        const grams = parseFloat(addGramsInput.value);
+        const cost = parseFloat(addCostInput.value);
+        if (isNaN(grams) || grams <= 0) {
+            showMessage(stockMsg, 'Insira a quantidade em gramas.', true);
+            return;
+        }
+        btnAddStock.disabled = true;
+        btnAddStock.textContent = 'Adicionando...';
+        try {
+            const res = await authFetch(`${API_URL}/system/stock`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ added_grams: grams, added_cost: isNaN(cost) ? 0 : cost })
+            });
+            if (res.ok) {
+                showMessage(stockMsg, 'Estoque adicionado com sucesso!');
+                addGramsInput.value = '';
+                addCostInput.value = '';
+                loadSystemState();
+                loadStockHistory();
+                loadPriceHistory();
+                loadBalanceCard();
+                loadEquityCard();
+            }
+        } catch {
+            showMessage(stockMsg, 'Erro de conexão', true);
+        } finally {
+            btnAddStock.disabled = false;
+            btnAddStock.textContent = 'Adicionar ao Estoque';
+        }
+    }
+
+    // =====================
+    //  SAVE USER
+    // =====================
+    async function handleSaveUser() {
+        const id = editUserId.value;
+        const name = newUserName.value.trim();
+        const matricula = newUserMatricula.value.trim();
+        const balance = parseFloat(newUserBalance.value) || 0;
+        if (!name || !matricula) {
+            showMessage(userMsg, 'Preencha nome e matrícula.', true);
+            return;
+        }
+        btnSaveUser.disabled = true;
+        const url = id ? `${API_URL}/users/${id}` : `${API_URL}/users`;
+        const method = id ? 'PUT' : 'POST';
+        try {
+            const res = await authFetch(url, {
+                method,
+                headers: authHeaders(),
+                body: JSON.stringify({ name, matricula, balance })
+            });
+            if (res.ok) {
+                showMessage(userMsg, id ? 'Usuário atualizado!' : 'Usuário cadastrado!');
+                setTimeout(() => { userModal.classList.add('hidden'); loadUsers(); }, 1000);
+            } else {
+                const data = await res.json();
+                showMessage(userMsg, data.error || 'Erro ao salvar', true);
+            }
+        } catch {
+            showMessage(userMsg, 'Erro de conexão', true);
+        } finally {
+            btnSaveUser.disabled = false;
+        }
+    }
+
+    // =====================
+    //  GLOBALS
+    // =====================
+    window.editUser = function (id, name, matricula, balance) {
+        userModalTitle.textContent = 'Editar Usuário';
+        editUserId.value = id;
+        newUserName.value = name;
+        newUserMatricula.value = matricula;
+        newUserBalance.value = balance;
+        userMsg.textContent = '';
+        userModal.classList.remove('hidden');
+    };
+
+    window.deleteUser = async function (id) {
+        if (!confirm('Deseja realmente excluir este usuário?')) return;
+        try {
+            const res = await authFetch(`${API_URL}/users/${id}`, {
+                method: 'DELETE',
+                headers: authHeaders()
+            });
+            if (res.ok) loadUsers();
+            else alert('Erro ao excluir usuário');
+        } catch {
+            alert('Erro de conexão');
+        }
+    };
+
+    // =====================
+    //  USER SUMMARY PANEL
+    // =====================
+    const summaryOverlay = document.getElementById('user-summary-overlay');
+    const btnCloseSummary = document.getElementById('btn-close-summary');
+
+    function openSummaryPanel() {
+        summaryOverlay.classList.add('open');
+        document.body.style.overflow = 'hidden';
+    }
+    function closeSummaryPanel() {
+        summaryOverlay.classList.remove('open');
+        document.body.style.overflow = '';
+    }
+
+    if (btnCloseSummary) btnCloseSummary.addEventListener('click', closeSummaryPanel);
+    if (summaryOverlay) summaryOverlay.addEventListener('click', e => { if (e.target === summaryOverlay) closeSummaryPanel(); });
+
+    window.openUserSummary = async function (id) {
+        document.getElementById('usr-name').textContent = '—';
+        document.getElementById('usr-meta').textContent = '—';
+        document.getElementById('usr-avatar').textContent = '…';
+        document.getElementById('usr-balance').textContent = 'R$ —';
+        document.getElementById('usr-last-tx').textContent = '—';
+        document.getElementById('usr-total-cons').textContent = '—';
+        document.getElementById('usr-total-val').textContent = '—';
+        document.getElementById('usr-total-rec').textContent = '—';
+        document.getElementById('usr-total-rec-val').textContent = '—';
+        document.getElementById('usr-tx-list').innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Carregando...</p>';
+        openSummaryPanel();
+
+        try {
+            const res = await authFetch(`${API_URL}/admin/users/${id}/summary`);
+            if (!res.ok) { document.getElementById('usr-tx-list').innerHTML = '<p style="color:var(--danger)">Erro ao carregar dados.</p>'; return; }
+            const data = await res.json();
+            const { user, stats, weekly, recent_transactions } = data;
+
+            const initials = user.name.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+            document.getElementById('usr-avatar').textContent = initials;
+            document.getElementById('usr-name').textContent = user.name;
+            document.getElementById('usr-meta').textContent = `Matrícula: ${user.matricula}`;
+            document.getElementById('usr-balance').textContent = `R$ ${parseFloat(user.balance).toFixed(2).replace('.', ',')}`;
+
+            const lastTx = stats.last_transaction
+                ? new Date(stats.last_transaction).toLocaleDateString('pt-BR')
+                : 'Nenhuma';
+            document.getElementById('usr-last-tx').textContent = lastTx;
+
+            document.getElementById('usr-total-cons').textContent = stats.total_consumptions;
+            document.getElementById('usr-total-val').textContent = `R$ ${parseFloat(stats.total_consumed_value).toFixed(2).replace('.', ',')}`;
+            document.getElementById('usr-total-rec').textContent = stats.total_recharges;
+            document.getElementById('usr-total-rec-val').textContent = `R$ ${parseFloat(stats.total_recharged_value).toFixed(2).replace('.', ',')}`;
+
+            const gridColor = 'rgba(255,255,255,0.07)';
+            const tickColor = '#94a3b8';
+            const amber = '#f59e0b';
+            if (chartUserWeekly) chartUserWeekly.destroy();
+            chartUserWeekly = new Chart(document.getElementById('chart-user-weekly'), {
+                type: 'bar',
+                data: {
+                    labels: weekly.map(r => 'Sem ' + r.label),
+                    datasets: [{ data: weekly.map(r => parseInt(r.count)), backgroundColor: `${amber}99`, borderColor: amber, borderWidth: 2, borderRadius: 5 }]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${ctx.parsed.y} doses` } } },
+                    scales: {
+                        x: { ticks: { color: tickColor, font: { size: 9 } }, grid: { color: gridColor } },
+                        y: { ticks: { color: tickColor, font: { size: 9 } }, grid: { color: gridColor }, beginAtZero: true }
+                    }
+                }
+            });
+
+            if (recent_transactions.length === 0) {
+                document.getElementById('usr-tx-list').innerHTML = '<p style="color:var(--text-muted);font-size:0.85rem;">Sem transações registradas.</p>';
+            } else {
+                document.getElementById('usr-tx-list').innerHTML = recent_transactions.map(tx => {
+                    const isConsumption = tx.type === 'consumption';
+                    const sign = isConsumption ? '−' : '+';
+                    const cls = isConsumption ? 'tx-type-consumption' : 'tx-type-recharge';
+                    const label = isConsumption ? 'Consumo' : 'Recarga';
+                    const date = new Date(tx.timestamp).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+                    return `<div class="usr-tx-row">
+                        <div>
+                            <span class="${cls}">${label}</span>
+                            <div class="usr-tx-date">${date}</div>
+                        </div>
+                        <span class="${cls}" style="font-weight:600;">${sign} R$ ${Math.abs(parseFloat(tx.amount)).toFixed(2).replace('.', ',')}</span>
+                    </div>`;
+                }).join('');
+            }
+        } catch (err) {
+            document.getElementById('usr-tx-list').innerHTML = '<p style="color:var(--danger)">Erro de conexão.</p>';
+        }
+    };
+
+    function showMessage(element, text, isError = false) {
+        element.textContent = text;
+        element.style.color = isError ? 'var(--danger)' : 'var(--success)';
+        setTimeout(() => element.textContent = '', 4000);
+    }
+
+    // =====================
+    //  COFFEES MANAGEMENT
+    // =====================
+    function escapeHtmlSafe(s) {
+        return String(s || '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    }
+    function starsHtml(value) {
+        const v = Math.round(parseFloat(value) || 0);
+        let h = '<span class="star-rating">';
+        for (let i = 1; i <= 5; i++) h += `<span class="star ${i <= v ? 'filled' : ''}">★</span>`;
+        h += '</span>';
+        return h;
+    }
+    function formatBR(ts) {
+        if (!ts) return '';
+        const d = new Date(ts);
+        return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    }
+
+    async function loadCoffees() {
+        const grid = document.getElementById('coffees-grid');
+        if (!grid) return;
+        try {
+            const res = await authFetch(`${API_URL}/coffees?all=1`);
+            const coffees = await res.json();
+            if (!Array.isArray(coffees) || coffees.length === 0) {
+                grid.innerHTML = '<p style="color:var(--text-muted); font-size:0.85rem;">Nenhum café cadastrado ainda.</p>';
+                return;
+            }
+            grid.innerHTML = coffees.map(c => {
+                const img = c.has_image
+                    ? `<img src="/api/coffees/${c.id}/image" alt="${escapeHtmlSafe(c.name)}">`
+                    : `<span class="placeholder">☕</span>`;
+                const avg = parseFloat(c.avg_rating).toFixed(1);
+                return `
+                    <div class="coffee-card ${c.active ? '' : 'inactive'}" data-id="${c.id}">
+                        <div class="coffee-img-wrap">${img}</div>
+                        <div class="coffee-body">
+                            <div class="coffee-title">${escapeHtmlSafe(c.name)}${c.active ? '' : ' <span style="font-size:0.7rem; color:var(--text-muted);">(inativo)</span>'}</div>
+                            ${c.origin ? `<div class="coffee-origin">📍 ${escapeHtmlSafe(c.origin)}</div>` : ''}
+                            ${c.description ? `<div class="coffee-desc">${escapeHtmlSafe(c.description)}</div>` : ''}
+                            <div class="coffee-meta">
+                                <span>${starsHtml(c.avg_rating)} <strong style="color:var(--text-primary)">${avg}</strong></span>
+                                <span>${c.rating_count} ${c.rating_count === 1 ? 'avaliação' : 'avaliações'}</span>
+                            </div>
+                        </div>
+                        <div class="coffee-actions">
+                            <button class="btn btn-outline btn-view-ratings" data-id="${c.id}" data-name="${escapeHtmlSafe(c.name)}">Ver Avaliações</button>
+                            <button class="btn btn-secondary btn-edit-coffee" data-id="${c.id}">Editar</button>
+                            <button class="btn btn-outline btn-delete-coffee" data-id="${c.id}" style="color:var(--danger); border-color:var(--danger);">×</button>
+                        </div>
+                    </div>`;
+            }).join('');
+            grid.querySelectorAll('.btn-view-ratings').forEach(b => b.addEventListener('click', () => openRatingsModal(b.dataset.id, b.dataset.name)));
+            grid.querySelectorAll('.btn-edit-coffee').forEach(b => b.addEventListener('click', () => startEditCoffee(b.dataset.id, coffees)));
+            grid.querySelectorAll('.btn-delete-coffee').forEach(b => b.addEventListener('click', () => deleteCoffee(b.dataset.id)));
+        } catch (err) {
+            grid.innerHTML = `<p style="color:var(--danger); font-size:0.85rem;">Erro: ${err.message}</p>`;
+        }
+    }
+
+    function resetCoffeeForm() {
+        document.getElementById('edit-coffee-id').value = '';
+        document.getElementById('coffee-name').value = '';
+        document.getElementById('coffee-origin').value = '';
+        document.getElementById('coffee-description').value = '';
+        document.getElementById('coffee-image').value = '';
+        document.getElementById('coffee-active').checked = true;
+        document.getElementById('coffee-image-preview-wrap').style.display = 'none';
+        document.getElementById('coffee-image-preview').src = '';
+        document.getElementById('coffee-image-preview').dataset.removeOnSave = '';
+        document.getElementById('coffee-form-title').textContent = 'Adicionar Café';
+        document.getElementById('btn-save-coffee').textContent = 'Salvar Café';
+        document.getElementById('btn-cancel-coffee').style.display = 'none';
+    }
+
+    function startEditCoffee(id, coffees) {
+        const c = coffees.find(x => String(x.id) === String(id));
+        if (!c) return;
+        document.getElementById('edit-coffee-id').value = c.id;
+        document.getElementById('coffee-name').value = c.name || '';
+        document.getElementById('coffee-origin').value = c.origin || '';
+        document.getElementById('coffee-description').value = c.description || '';
+        document.getElementById('coffee-image').value = '';
+        document.getElementById('coffee-active').checked = !!c.active;
+        const prevWrap = document.getElementById('coffee-image-preview-wrap');
+        const prev = document.getElementById('coffee-image-preview');
+        if (c.has_image) {
+            prev.src = `/api/coffees/${c.id}/image?v=${Date.now()}`;
+            prev.dataset.removeOnSave = '';
+            prevWrap.style.display = 'block';
+        } else {
+            prevWrap.style.display = 'none';
+            prev.src = '';
+        }
+        document.getElementById('coffee-form-title').textContent = 'Editar Café';
+        document.getElementById('btn-save-coffee').textContent = 'Salvar Alterações';
+        document.getElementById('btn-cancel-coffee').style.display = 'inline-block';
+        document.getElementById('tab-cafes').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    async function deleteCoffee(id) {
+        if (!confirm('Tem certeza? Isso apaga o café e todas as suas avaliações.')) return;
+        try {
+            const res = await authFetch(`${API_URL}/admin/coffees/${id}`, { method: 'DELETE', headers: authHeaders() });
+            if (!res.ok) throw new Error('Falha ao remover');
+            await loadCoffees();
+        } catch (err) {
+            alert('Erro: ' + err.message);
+        }
+    }
+
+    async function saveCoffee() {
+        const msg = document.getElementById('coffee-form-msg');
+        const id = document.getElementById('edit-coffee-id').value;
+        const name = document.getElementById('coffee-name').value.trim();
+        if (!name) return showMessage(msg, 'Informe o nome do café.', true);
+        const fd = new FormData();
+        fd.append('name', name);
+        fd.append('description', document.getElementById('coffee-description').value);
+        fd.append('origin', document.getElementById('coffee-origin').value);
+        fd.append('active', document.getElementById('coffee-active').checked ? 'true' : 'false');
+        const file = document.getElementById('coffee-image').files[0];
+        if (file) fd.append('image', file);
+        else if (id && document.getElementById('coffee-image-preview').dataset.removeOnSave === '1') {
+            fd.append('remove_image', 'true');
+        }
+        try {
+            const url = id ? `${API_URL}/admin/coffees/${id}` : `${API_URL}/admin/coffees`;
+            const method = id ? 'PUT' : 'POST';
+            const res = await fetch(url, { method, headers: { 'Authorization': `Bearer ${getToken()}` }, body: fd });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Falha ao salvar');
+            showMessage(msg, id ? 'Café atualizado!' : 'Café cadastrado!');
+            resetCoffeeForm();
+            await loadCoffees();
+        } catch (err) {
+            showMessage(msg, err.message, true);
+        }
+    }
+
+    async function openRatingsModal(coffeeId, coffeeName) {
+        document.getElementById('coffee-ratings-title').textContent = `Avaliações — ${coffeeName}`;
+        const listEl = document.getElementById('coffee-ratings-list');
+        const sumEl = document.getElementById('coffee-ratings-summary');
+        listEl.innerHTML = '<p style="color:var(--text-muted);">Carregando...</p>';
+        sumEl.textContent = '';
+        document.getElementById('coffee-ratings-modal').classList.remove('hidden');
+        try {
+            const res = await fetch(`${API_URL}/coffees/${coffeeId}/ratings`);
+            const ratings = await res.json();
+            if (!Array.isArray(ratings) || ratings.length === 0) {
+                sumEl.textContent = 'Nenhuma avaliação ainda.';
+                listEl.innerHTML = '';
+                return;
+            }
+            const avg = ratings.reduce((s, r) => s + r.rating, 0) / ratings.length;
+            sumEl.innerHTML = `${starsHtml(avg)} <strong style="color:var(--text-primary)">${avg.toFixed(1)}</strong> · ${ratings.length} ${ratings.length === 1 ? 'avaliação' : 'avaliações'}`;
+            listEl.innerHTML = ratings.map(r => `
+                <div class="rating-row">
+                    <div class="rating-head">
+                        <div>
+                            <span class="rating-user">${escapeHtmlSafe(r.user_name)}</span>
+                            ${starsHtml(r.rating)}
+                        </div>
+                        <span class="rating-date">${formatBR(r.updated_at)}</span>
+                    </div>
+                    ${r.comment ? `<div class="rating-comment">${escapeHtmlSafe(r.comment)}</div>` : ''}
+                </div>`).join('');
+        } catch (err) {
+            listEl.innerHTML = `<p style="color:var(--danger);">Erro: ${err.message}</p>`;
+        }
+    }
+
+    // Wire up coffees tab
+    const tabBtnCafes = document.querySelector('.tab-btn[data-tab="cafes"]');
+    if (tabBtnCafes) tabBtnCafes.addEventListener('click', loadCoffees);
+    const btnSaveCoffee = document.getElementById('btn-save-coffee');
+    if (btnSaveCoffee) btnSaveCoffee.addEventListener('click', saveCoffee);
+    const btnCancelCoffee = document.getElementById('btn-cancel-coffee');
+    if (btnCancelCoffee) btnCancelCoffee.addEventListener('click', resetCoffeeForm);
+    const btnRemoveImg = document.getElementById('btn-remove-coffee-image');
+    if (btnRemoveImg) btnRemoveImg.addEventListener('click', () => {
+        const prev = document.getElementById('coffee-image-preview');
+        prev.dataset.removeOnSave = '1';
+        document.getElementById('coffee-image-preview-wrap').style.display = 'none';
+        document.getElementById('coffee-image').value = '';
+    });
+    const coffeeFileInput = document.getElementById('coffee-image');
+    if (coffeeFileInput) coffeeFileInput.addEventListener('change', () => {
+        const f = coffeeFileInput.files[0];
+        if (!f) return;
+        const reader = new FileReader();
+        reader.onload = e => {
+            document.getElementById('coffee-image-preview').src = e.target.result;
+            document.getElementById('coffee-image-preview-wrap').style.display = 'block';
+        };
+        reader.readAsDataURL(f);
+    });
+    const closeRatings = document.getElementById('close-coffee-ratings');
+    if (closeRatings) closeRatings.addEventListener('click', () => document.getElementById('coffee-ratings-modal').classList.add('hidden'));
+    document.getElementById('coffee-ratings-modal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'coffee-ratings-modal') e.target.classList.add('hidden');
+    });
+    // Auto-load if user starts on cafes tab
+    if (sessionStorage.getItem('adminTab') === 'cafes') setTimeout(loadCoffees, 300);
+
+    // =====================
+    //  INVOICES (NOTAS FISCAIS) - AI
+    // =====================
+    let invoiceExisting = [];
+
+    function buildCatalogSelect(matchedId) {
+        const opts = ['<option value="">— Criar novo café —</option>']
+            .concat(invoiceExisting.map(c =>
+                `<option value="${c.id}" ${c.id === matchedId ? 'selected' : ''}>${c.name}</option>`
+            ));
+        return `<select class="invoice-coffee-match" style="background:rgba(255,255,255,0.05); color:var(--text-primary); border:1px solid rgba(255,255,255,0.15); border-radius:6px; padding:4px;">${opts.join('')}</select>`;
+    }
+
+    function addInvoiceCoffeeRow(c) {
+        const tbody = document.getElementById('invoice-coffees-body');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><input type="text" class="invoice-coffee-name" value="${(c.name || '').replace(/"/g, '&quot;')}" style="width:160px; background:rgba(255,255,255,0.05); color:var(--text-primary); border:1px solid rgba(255,255,255,0.15); border-radius:6px; padding:4px;"></td>
+            <td><input type="number" class="invoice-coffee-grams" value="${c.grams != null ? c.grams : ''}" step="1" min="1" style="width:90px; background:rgba(255,255,255,0.05); color:var(--text-primary); border:1px solid rgba(255,255,255,0.15); border-radius:6px; padding:4px;"></td>
+            <td><input type="number" class="invoice-coffee-value" value="${c.value != null ? c.value : ''}" step="0.01" min="0" style="width:90px; background:rgba(255,255,255,0.05); color:var(--text-primary); border:1px solid rgba(255,255,255,0.15); border-radius:6px; padding:4px;"></td>
+            <td>${buildCatalogSelect(c.matched_coffee_id != null ? c.matched_coffee_id : '')}</td>
+            <td><button class="invoice-row-remove" style="background:none; border:1px solid #f87171; color:#f87171; border-radius:6px; padding:2px 8px; cursor:pointer;">×</button></td>`;
+        tr.querySelector('.invoice-row-remove').addEventListener('click', () => tr.remove());
+        tbody.appendChild(tr);
+    }
+
+    function addInvoiceExtraRow(e) {
+        const tbody = document.getElementById('invoice-extras-body');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td><input type="text" class="invoice-extra-desc" value="${(e.description || '').replace(/"/g, '&quot;')}" style="width:200px; background:rgba(255,255,255,0.05); color:var(--text-primary); border:1px solid rgba(255,255,255,0.15); border-radius:6px; padding:4px;"></td>
+            <td><input type="number" class="invoice-extra-amount" value="${e.amount != null ? e.amount : ''}" step="0.01" min="0.01" style="width:90px; background:rgba(255,255,255,0.05); color:var(--text-primary); border:1px solid rgba(255,255,255,0.15); border-radius:6px; padding:4px;"></td>
+            <td><button class="invoice-row-remove" style="background:none; border:1px solid #f87171; color:#f87171; border-radius:6px; padding:2px 8px; cursor:pointer;">×</button></td>`;
+        tr.querySelector('.invoice-row-remove').addEventListener('click', () => tr.remove());
+        tbody.appendChild(tr);
+    }
+
+    const btnAnalyzeInvoice = document.getElementById('btn-analyze-invoice');
+    if (btnAnalyzeInvoice) btnAnalyzeInvoice.addEventListener('click', async () => {
+        const fileInput = document.getElementById('invoice-file');
+        const msg = document.getElementById('invoice-msg');
+        const file = fileInput.files[0];
+        if (!file) { msg.textContent = 'Selecione uma imagem ou PDF da nota fiscal.'; msg.style.color = '#f87171'; return; }
+        msg.style.color = 'var(--text-muted)';
+        msg.textContent = 'Analisando com IA... isso pode levar alguns segundos.';
+        btnAnalyzeInvoice.disabled = true;
+        try {
+            const fd = new FormData();
+            fd.append('nota', file);
+            const res = await authFetch(`${API_URL}/admin/invoices/analyze`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${getToken()}` },
+                body: fd
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Falha na análise.');
+            invoiceExisting = data.existing_coffees || [];
+            document.getElementById('invoice-coffees-body').innerHTML = '';
+            document.getElementById('invoice-extras-body').innerHTML = '';
+            (data.coffees || []).forEach(addInvoiceCoffeeRow);
+            (data.extras || []).forEach(addInvoiceExtraRow);
+            if ((data.coffees || []).length === 0) addInvoiceCoffeeRow({});
+            document.getElementById('invoice-summary').textContent = data.summary || '';
+            document.getElementById('invoice-preview').style.display = 'block';
+            document.getElementById('invoice-commit-msg').textContent = '';
+            msg.textContent = 'Análise concluída. Confira e ajuste os itens antes de lançar.';
+            msg.style.color = '#4ade80';
+        } catch (err) {
+            msg.textContent = `Erro: ${err.message}`;
+            msg.style.color = '#f87171';
+        } finally {
+            btnAnalyzeInvoice.disabled = false;
+        }
+    });
+
+    document.getElementById('btn-add-invoice-coffee')?.addEventListener('click', () => addInvoiceCoffeeRow({}));
+    document.getElementById('btn-add-invoice-extra')?.addEventListener('click', () => addInvoiceExtraRow({}));
+
+    const btnCommitInvoice = document.getElementById('btn-commit-invoice');
+    if (btnCommitInvoice) btnCommitInvoice.addEventListener('click', async () => {
+        const cmsg = document.getElementById('invoice-commit-msg');
+        const coffees = [];
+        document.querySelectorAll('#invoice-coffees-body tr').forEach(tr => {
+            const name = tr.querySelector('.invoice-coffee-name').value.trim();
+            const grams = parseFloat(tr.querySelector('.invoice-coffee-grams').value);
+            const value = parseFloat(tr.querySelector('.invoice-coffee-value').value);
+            const sel = tr.querySelector('.invoice-coffee-match').value;
+            const coffeeId = sel ? parseInt(sel) : null;
+            if (!name && isNaN(grams) && isNaN(value)) return;
+            coffees.push({ name, grams, value, coffee_id: coffeeId, create_new: coffeeId === null });
+        });
+        const extras = [];
+        document.querySelectorAll('#invoice-extras-body tr').forEach(tr => {
+            const description = tr.querySelector('.invoice-extra-desc').value.trim();
+            const amount = parseFloat(tr.querySelector('.invoice-extra-amount').value);
+            if (!description && isNaN(amount)) return;
+            extras.push({ description, amount });
+        });
+        if (coffees.length === 0 && extras.length === 0) {
+            cmsg.textContent = 'Adicione ao menos um item.'; cmsg.style.color = '#f87171'; return;
+        }
+        cmsg.style.color = 'var(--text-muted)';
+        cmsg.textContent = 'Lançando...';
+        btnCommitInvoice.disabled = true;
+        try {
+            const res = await authFetch(`${API_URL}/admin/invoices/commit`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ coffees, extras })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Falha ao lançar.');
+            cmsg.style.color = '#4ade80';
+            cmsg.textContent = `✓ Lançado! ${data.stockEntries} remessa(s), ${data.createdCoffees} café(s) novo(s), ${data.extrasAdded} custo(s) extra(s).`;
+            document.getElementById('invoice-preview').style.display = 'none';
+            document.getElementById('invoice-file').value = '';
+            document.getElementById('invoice-msg').textContent = '';
+            if (typeof loadSystemState === 'function') await loadSystemState();
+            if (typeof loadStockHistory === 'function') await loadStockHistory();
+            if (typeof loadExtraCosts === 'function') await loadExtraCosts();
+            if (typeof loadCoffees === 'function') await loadCoffees();
+        } catch (err) {
+            cmsg.style.color = '#f87171';
+            cmsg.textContent = `Erro: ${err.message}`;
+        } finally {
+            btnCommitInvoice.disabled = false;
+        }
+    });
+});

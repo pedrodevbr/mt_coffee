@@ -1,0 +1,16 @@
+node_modules
+.git
+.gitignore
+.env
+*.sqlite
+
+# Sobras do Replit
+.replit
+replit.nix
+replit.md
+.replit_integration_files
+
+# Peso morto na imagem: o backup tem ~33MB e os comprovantes vivem no Postgres
+exports
+attached_assets
+uploads

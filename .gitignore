@@ -1,0 +1,13 @@
+node_modules
+*.sqlite
+error.log
+public/assets/qr_code.*
+.env
+uploads/receipts/*
+!uploads/receipts/.gitkeep
+
+# Dump do banco: ~33MB e contém dados pessoais e comprovantes. Guarde fora do Git.
+exports/
+
+# Contém o JWT_SECRET antigo em texto claro.
+.replit

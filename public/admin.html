@@ -1,0 +1,1155 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MT Coffee - Painel Admin</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        body {
+            align-items: flex-start;
+        }
+
+        .admin-wrapper {
+            width: 100%;
+            max-width: 960px;
+            margin: 40px auto;
+            padding: 30px 20px;
+        }
+
+        .admin-dashboard {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 20px;
+        }
+
+        @media (min-width: 768px) {
+            .admin-dashboard {
+                grid-template-columns: 1fr 1fr;
+            }
+
+            .span-2 {
+                grid-column: span 2;
+            }
+        }
+
+        .admin-card {
+            padding: 20px;
+            border-radius: 16px;
+        }
+
+        .table-container {
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 10px;
+            color: #fff;
+        }
+
+        th, td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 0.9rem;
+        }
+
+        th {
+            background: rgba(255, 255, 255, 0.05);
+            font-weight: 500;
+        }
+
+        tr:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .stock-display {
+            font-size: 2rem;
+            font-weight: 700;
+            margin: 10px 0;
+            color: var(--primary-color);
+        }
+
+        /* KPI Cards */
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 14px;
+            margin-bottom: 0;
+        }
+
+        @media (min-width: 600px) {
+            .kpi-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
+        }
+
+        .kpi-card {
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            border-radius: 14px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .kpi-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .kpi-value {
+            font-size: 1.7rem;
+            font-weight: 700;
+            color: var(--primary-color);
+            line-height: 1;
+        }
+
+        .kpi-sub {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        /* Chart containers */
+        .chart-wrap {
+            position: relative;
+            height: 220px;
+            margin-top: 16px;
+        }
+
+        .section-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .section-sub {
+            font-size: 0.82rem;
+            color: var(--text-muted);
+            margin-bottom: 0;
+        }
+
+        /* Top users bar */
+        .top-user-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .top-user-name {
+            flex: 1;
+            font-size: 0.9rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .top-user-bar-wrap {
+            flex: 2;
+            background: rgba(255,255,255,0.08);
+            border-radius: 4px;
+            height: 8px;
+            overflow: hidden;
+        }
+
+        .top-user-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-color), #d97706);
+            border-radius: 4px;
+            transition: width 0.8s ease;
+        }
+
+        .top-user-count {
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: var(--primary-color);
+            min-width: 24px;
+            text-align: right;
+        }
+
+        hr.divider {
+            border: none;
+            border-top: 1px solid rgba(255,255,255,0.1);
+            margin: 16px 0;
+        }
+
+        /* ---- User Summary Panel ---- */
+        #user-summary-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.55);
+            z-index: 200;
+            display: none;
+            justify-content: flex-end;
+        }
+        #user-summary-overlay.open { display: flex; }
+
+        #user-summary-panel {
+            width: min(480px, 100vw);
+            height: 100%;
+            background: var(--card-bg, #1e293b);
+            border-left: 1px solid rgba(255,255,255,0.1);
+            overflow-y: auto;
+            padding: 28px 24px 40px;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        #user-summary-overlay.open #user-summary-panel {
+            transform: translateX(0);
+        }
+
+        .usr-header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .usr-avatar {
+            width: 56px; height: 56px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-color), #d97706);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.4rem; font-weight: 700; color: #fff;
+            flex-shrink: 0;
+        }
+        .usr-name { font-size: 1.15rem; font-weight: 600; }
+        .usr-meta { font-size: 0.82rem; color: var(--text-muted); margin-top: 2px; }
+
+        .usr-balance-box {
+            background: rgba(245,158,11,0.1);
+            border: 1px solid rgba(245,158,11,0.25);
+            border-radius: 12px;
+            padding: 14px 18px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .usr-balance-label { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .05em; }
+        .usr-balance-val { font-size: 1.6rem; font-weight: 700; color: var(--primary-color); }
+
+        .usr-stats-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+        }
+        .usr-stat {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 10px;
+            padding: 12px 14px;
+        }
+        .usr-stat-label { font-size: 0.73rem; color: var(--text-muted); text-transform: uppercase; letter-spacing:.04em; margin-bottom: 4px; }
+        .usr-stat-val { font-size: 1.15rem; font-weight: 700; }
+
+        .usr-chart-wrap { position: relative; height: 160px; }
+
+        .usr-tx-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+            font-size: 0.87rem;
+        }
+        .usr-tx-row:last-child { border-bottom: none; }
+        .usr-tx-date { color: var(--text-muted); font-size: 0.78rem; }
+        .tx-type-consumption { color: #f87171; }
+        .tx-type-recharge { color: #4ade80; }
+
+        /* ---- Tabs ---- */
+        .tab-nav {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 24px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 14px;
+            padding: 5px;
+            flex-wrap: wrap;
+        }
+        .tab-btn {
+            flex: 1;
+            min-width: 90px;
+            background: none;
+            border: none;
+            padding: 9px 12px;
+            border-radius: 10px;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: background 0.18s, color 0.18s;
+            white-space: nowrap;
+        }
+        .tab-btn:hover { background: rgba(255,255,255,0.07); color: var(--text-primary); }
+        .tab-btn.active { background: var(--primary-color); color: #000; font-weight: 600; }
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+    </style>
+</head>
+
+<body>
+    <div class="background-animation">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <div class="admin-wrapper">
+        <header class="header" style="text-align:center; margin-bottom: 28px; position: relative;">
+            <h1 class="logo">MT <span>Coffee</span> Admin</h1>
+            <p class="subtitle">Gestão de Estoque e Usuários</p>
+            <div style="position: absolute; top: 0; right: 0; display: flex; gap: 8px;">
+                <button id="btn-open-pin-modal" class="btn btn-outline" style="width: auto; padding: 6px 14px; font-size: 0.8rem;">Alterar PIN</button>
+                <button id="btn-logout" class="btn btn-outline" style="width: auto; padding: 6px 14px; font-size: 0.8rem; border-color: var(--danger); color: var(--danger);">Sair</button>
+            </div>
+        </header>
+
+        <!-- ===== TAB NAV ===== -->
+        <nav class="tab-nav">
+            <button class="tab-btn active" data-tab="dashboard">Dashboard</button>
+            <button class="tab-btn" data-tab="financeiro">Financeiro</button>
+            <button class="tab-btn tab-btn-receipts" data-tab="comprovantes">
+                Comprovantes
+                <span id="receipts-pending-badge" style="background:#f59e0b; color:#000; border-radius:10px; padding:1px 8px; font-size:0.72rem; font-weight:700; margin-left:4px; display:none;">0</span>
+            </button>
+            <button class="tab-btn" data-tab="estoque">Estoque</button>
+            <button class="tab-btn" data-tab="usuarios">Usuários</button>
+            <button class="tab-btn" data-tab="analise">Análise</button>
+            <button class="tab-btn" data-tab="cafes">Cafés</button>
+            <button class="tab-btn" data-tab="config">Configurações</button>
+        </nav>
+
+        <!-- ===== TAB: DASHBOARD ===== -->
+        <div class="tab-panel active" id="tab-dashboard">
+            <div class="admin-dashboard">
+                <div class="glass-panel admin-card span-2">
+                    <p class="section-title">Visão Geral</p>
+                    <p class="section-sub">Dados de consumo atualizados em tempo real</p>
+                    <hr class="divider">
+                    <div class="kpi-grid">
+                        <div class="kpi-card">
+                            <div class="kpi-label">Média Diária</div>
+                            <div class="kpi-value" id="kpi-avg-daily">--</div>
+                            <div class="kpi-sub">doses / dia útil</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Este Mês</div>
+                            <div class="kpi-value" id="kpi-this-month">--</div>
+                            <div class="kpi-sub">consumos</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Total Histórico</div>
+                            <div class="kpi-value" id="kpi-total">--</div>
+                            <div class="kpi-sub">consumos registrados</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Dias com Consumo</div>
+                            <div class="kpi-value" id="kpi-days">--</div>
+                            <div class="kpi-sub">dias úteis</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-panel admin-card span-2">
+                    <p class="section-title">Crédito dos Usuários — Passivo do Admin</p>
+                    <p class="section-sub">Saldos pré-pagos representam café que o sistema deve aos usuários</p>
+                    <hr class="divider">
+                    <div class="kpi-grid" style="grid-template-columns: repeat(3, 1fr);">
+                        <div class="kpi-card">
+                            <div class="kpi-label">Crédito a Entregar (Passivo)</div>
+                            <div class="kpi-value" id="kpi-credit-positive" style="color:#f87171;">R$ --</div>
+                            <div class="kpi-sub" id="kpi-credit-positive-sub">-- usuários com crédito</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">A Receber dos Usuários (Ativo)</div>
+                            <div class="kpi-value" id="kpi-credit-negative" style="color:#4ade80;">R$ --</div>
+                            <div class="kpi-sub" id="kpi-credit-negative-sub">-- usuários no negativo</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Passivo Líquido</div>
+                            <div class="kpi-value" id="kpi-credit-net">R$ --</div>
+                            <div class="kpi-sub" id="kpi-credit-net-sub">passivo − a receber</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-panel admin-card">
+                    <p class="section-title">Consumos por Semana</p>
+                    <p class="section-sub">Número de doses — últimas 12 semanas</p>
+                    <div class="chart-wrap">
+                        <canvas id="chart-weekly-count"></canvas>
+                    </div>
+                </div>
+
+                <div class="glass-panel admin-card">
+                    <p class="section-title">Valor Consumido por Semana</p>
+                    <p class="section-sub">Total gasto (R$) — últimas 12 semanas</p>
+                    <div class="chart-wrap">
+                        <canvas id="chart-weekly-value"></canvas>
+                    </div>
+                </div>
+
+                <div class="glass-panel admin-card span-2">
+                    <p class="section-title">Consumo por Usuário</p>
+                    <p class="section-sub">Todos os usuários — últimos 30 dias</p>
+                    <hr class="divider">
+                    <div id="top-users-list" style="max-height: 420px; overflow-y: auto; padding-right: 6px;">
+                        <p style="color: var(--text-muted); font-size: 0.85rem;">Carregando...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: FINANCEIRO ===== -->
+        <div class="tab-panel" id="tab-financeiro">
+            <div class="admin-dashboard">
+                <div class="glass-panel admin-card span-2" id="balance-card">
+                    <p class="section-title">Remessas vs Cobrado dos Usuários</p>
+                    <p class="section-sub">Custo total do café comprado × valor efetivamente recarregado pelos usuários</p>
+                    <hr class="divider">
+                    <div class="kpi-grid" style="margin-bottom: 16px;">
+                        <div class="kpi-card">
+                            <div class="kpi-label">Custo das Remessas</div>
+                            <div class="kpi-value" id="bal-stock-cost" style="color:#f87171;">R$ --</div>
+                            <div class="kpi-sub" id="bal-remessas-count">-- remessas</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Arrecadado (recargas)</div>
+                            <div class="kpi-value" id="bal-collected" style="color:#4ade80;">R$ --</div>
+                            <div class="kpi-sub" id="bal-consumptions-count">-- recargas</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Balanço</div>
+                            <div class="kpi-value" id="bal-balance">R$ --</div>
+                            <div class="kpi-sub" id="bal-balance-label">--</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Valor Consumido</div>
+                            <div class="kpi-value" id="bal-recharged" style="color:#60a5fa;">R$ --</div>
+                            <div class="kpi-sub">pelos usuários</div>
+                        </div>
+                    </div>
+                    <div id="bal-bar-wrap" style="margin-bottom: 16px; display:none;">
+                        <div style="display:flex; justify-content:space-between; font-size:0.78rem; color:var(--text-muted); margin-bottom: 6px;">
+                            <span>Cobertura dos custos</span>
+                            <span id="bal-coverage-pct">--%</span>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.08); border-radius:6px; height:10px; overflow:hidden;">
+                            <div id="bal-coverage-bar" style="height:100%; border-radius:6px; transition: width 0.8s ease; width:0%;"></div>
+                        </div>
+                    </div>
+                    <div class="chart-wrap" style="height:200px;">
+                        <canvas id="chart-balance-weekly"></canvas>
+                    </div>
+                    <p style="font-size:0.75rem; color:var(--text-muted); margin-top:8px; text-align:center;">
+                        * Custo das remessas registrado a partir da implantação do histórico de estoque
+                    </p>
+                </div>
+
+                <div class="glass-panel admin-card span-2" id="equity-card">
+                    <p class="section-title">Patrimônio — Passivo × Ativos</p>
+                    <p class="section-sub">Ativos (estoque + caixa + a receber) menos o passivo (créditos devidos aos usuários)</p>
+                    <hr class="divider">
+
+                    <p style="font-size:0.8rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; margin:4px 0 12px;">No Momento</p>
+                    <div class="kpi-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 14px;">
+                        <div class="kpi-card">
+                            <div class="kpi-label">Estoque</div>
+                            <div class="kpi-value" id="eq-stock" style="color:#60a5fa;">R$ --</div>
+                            <div class="kpi-sub" id="eq-stock-sub">-- g em estoque</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Caixa</div>
+                            <div class="kpi-value" id="eq-cash" style="color:#4ade80;">R$ --</div>
+                            <div class="kpi-sub">recargas − compras</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">A Receber</div>
+                            <div class="kpi-value" id="eq-receivable" style="color:#fbbf24;">R$ --</div>
+                            <div class="kpi-sub" id="eq-receivable-sub">-- usuários no negativo</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Créditos Devidos (Passivo)</div>
+                            <div class="kpi-value" id="eq-credits" style="color:#f87171;">R$ --</div>
+                            <div class="kpi-sub" id="eq-credits-sub">-- usuários com crédito</div>
+                        </div>
+                    </div>
+                    <div class="kpi-grid" style="grid-template-columns: repeat(2, 1fr); margin-bottom: 8px;">
+                        <div class="kpi-card">
+                            <div class="kpi-label">Total de Ativos</div>
+                            <div class="kpi-value" id="eq-assets" style="color:#60a5fa;">R$ --</div>
+                            <div class="kpi-sub">estoque + caixa + a receber</div>
+                        </div>
+                        <div class="kpi-card" style="border:1px solid rgba(255,255,255,0.12);">
+                            <div class="kpi-label">Patrimônio Líquido</div>
+                            <div class="kpi-value" id="eq-net">R$ --</div>
+                            <div class="kpi-sub" id="eq-net-sub">ativos − passivo</div>
+                        </div>
+                    </div>
+
+                    <hr class="divider">
+                    <p style="font-size:0.8rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; margin:4px 0 12px;">Histórico (Acumulado)</p>
+                    <div class="kpi-grid" style="grid-template-columns: repeat(4, 1fr);">
+                        <div class="kpi-card">
+                            <div class="kpi-label">Total Arrecadado</div>
+                            <div class="kpi-value" id="eq-hist-recharged" style="color:#4ade80;">R$ --</div>
+                            <div class="kpi-sub" id="eq-hist-recharges-sub">-- recargas</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Total em Remessas</div>
+                            <div class="kpi-value" id="eq-hist-stock" style="color:#f87171;">R$ --</div>
+                            <div class="kpi-sub" id="eq-hist-remessas-sub">-- remessas</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Custos Extras</div>
+                            <div class="kpi-value" id="eq-hist-extra" style="color:#f87171;">R$ --</div>
+                            <div class="kpi-sub">frete e afins</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Total Consumido</div>
+                            <div class="kpi-value" id="eq-hist-consumed" style="color:#60a5fa;">R$ --</div>
+                            <div class="kpi-sub" id="eq-hist-consumos-sub">-- consumos</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: COMPROVANTES ===== -->
+        <div class="tab-panel" id="tab-comprovantes">
+            <div class="admin-dashboard">
+                <div class="glass-panel admin-card span-2" id="receipts-card">
+                    <p class="section-title">Comprovantes de Pagamento</p>
+                    <p class="section-sub">Comprovantes enviados pelos usuários aguardando conferência e aprovação</p>
+                    <hr class="divider">
+                    <div style="display:flex; gap:8px; margin-bottom:14px; flex-wrap:wrap;">
+                        <button class="btn btn-outline" id="btn-filter-receipts-all" style="padding:4px 14px; font-size:0.8rem;" data-filter="all">Todos</button>
+                        <button class="btn btn-outline" id="btn-filter-receipts-pending" style="padding:4px 14px; font-size:0.8rem; border-color:#f59e0b; color:#f59e0b;" data-filter="pending">Pendentes</button>
+                        <button class="btn btn-outline" id="btn-filter-receipts-approved" style="padding:4px 14px; font-size:0.8rem; border-color:#4ade80; color:#4ade80;" data-filter="approved">Aprovados</button>
+                        <button class="btn btn-outline" id="btn-filter-receipts-rejected" style="padding:4px 14px; font-size:0.8rem; border-color:#f87171; color:#f87171;" data-filter="rejected">Rejeitados</button>
+                    </div>
+                    <div style="overflow-x:auto;">
+                        <table class="data-table" id="receipts-table">
+                            <thead>
+                                <tr>
+                                    <th>Data</th>
+                                    <th>Usuário</th>
+                                    <th>Matrícula</th>
+                                    <th>Análise IA</th>
+                                    <th>Status</th>
+                                    <th>Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody id="receipts-tbody">
+                                <tr><td colspan="6" style="text-align:center;">Carregando...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: ESTOQUE ===== -->
+        <div class="tab-panel" id="tab-estoque">
+            <div class="admin-dashboard">
+                <div class="glass-panel admin-card">
+                    <h3>Visão de Estoque</h3>
+                    <div class="stock-display" id="admin-current-stock">-- g</div>
+                    <p>Preço por Dose: <strong id="admin-dose-price">R$ --</strong></p>
+                    <div id="dose-calc-breakdown"></div>
+                    <hr class="divider">
+                    <h4 style="margin-bottom: 12px;">Adicionar Remessa</h4>
+                    <div class="input-group small">
+                        <input type="number" id="add-grams" placeholder=" ">
+                        <label for="add-grams">Quantidade em Gramas</label>
+                    </div>
+                    <div class="input-group small">
+                        <input type="number" id="add-cost" placeholder=" " step="0.01">
+                        <label for="add-cost">Custo Total (R$)</label>
+                    </div>
+                    <button class="btn btn-primary" id="btn-add-stock" style="margin-top: 10px;">Adicionar ao Estoque</button>
+                    <p id="stock-msg" class="action-msg"></p>
+                </div>
+
+                <div class="glass-panel admin-card">
+                    <p class="section-title">Acerto de Estoque</p>
+                    <p class="section-sub">Corrija o estoque virtual quando o físico estiver diferente</p>
+                    <hr class="divider">
+                    <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:12px;">
+                        Estoque virtual atual: <strong id="adjust-virtual-stock" style="color:var(--text-primary);">-- g</strong>
+                    </p>
+                    <div class="input-group small">
+                        <input type="number" id="adjust-physical-grams" placeholder=" " step="1" min="0">
+                        <label for="adjust-physical-grams">Estoque físico real (g)</label>
+                    </div>
+                    <div id="adjust-preview" style="min-height:22px; font-size:0.82rem; margin:6px 0 10px;"></div>
+                    <div class="input-group small">
+                        <input type="text" id="adjust-reason" placeholder=" " maxlength="120">
+                        <label for="adjust-reason">Motivo (opcional)</label>
+                    </div>
+                    <button class="btn btn-primary" id="btn-apply-adjustment" style="margin-top:10px;">Registrar Acerto</button>
+                    <p id="adjust-msg" class="action-msg"></p>
+                    <div id="adjustments-list" style="margin-top:16px;"></div>
+                </div>
+
+                <div class="glass-panel admin-card">
+                    <p class="section-title">Custos Extras</p>
+                    <p class="section-sub">Gastos adicionais que impactam o custo unitário da dose (frete, embalagem, etc.)</p>
+                    <hr class="divider">
+                    <div class="input-group small">
+                        <input type="text" id="extra-cost-desc" placeholder=" " maxlength="100">
+                        <label for="extra-cost-desc">Descrição</label>
+                    </div>
+                    <div class="input-group small">
+                        <input type="number" id="extra-cost-amount" placeholder=" " step="0.01" min="0.01">
+                        <label for="extra-cost-amount">Valor (R$)</label>
+                    </div>
+                    <button class="btn btn-primary" id="btn-add-extra-cost" style="margin-top: 10px;">Adicionar Custo</button>
+                    <p id="extra-cost-msg" class="action-msg"></p>
+                    <div id="extra-cost-dilution-info"></div>
+                    <div id="extra-costs-list" style="margin-top: 14px;"></div>
+                </div>
+
+                <div class="glass-panel admin-card">
+                    <p class="section-title">Histórico de Remessas</p>
+                    <p class="section-sub">Últimas 30 entradas de estoque registradas</p>
+                    <hr class="divider">
+                    <div id="stock-history-wrap" style="overflow-x: auto;">
+                        <table class="data-table" id="stock-history-table">
+                            <thead>
+                                <tr>
+                                    <th>Data</th>
+                                    <th>Gramas</th>
+                                    <th>Custo (R$)</th>
+                                    <th>R$/kg</th>
+                                    <th title="Custo do café por dose nesta remessa, sem incluir custos extras">Custo Café/Dose</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="stock-history-body">
+                                <tr><td colspan="5" style="text-align:center; color: var(--text-muted);">Carregando...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="glass-panel admin-card span-2">
+                    <p class="section-title">Notas Fiscais (IA)</p>
+                    <p class="section-sub">Envie a foto ou o PDF de uma nota fiscal de café. A IA extrai os itens, pesos e valores para você conferir e lançar no estoque.</p>
+                    <hr class="divider">
+                    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                        <input type="file" id="invoice-file" accept="image/*,application/pdf" style="font-size:0.85rem;">
+                        <button class="btn btn-primary" id="btn-analyze-invoice" style="padding:6px 16px;">Analisar com IA</button>
+                    </div>
+                    <p id="invoice-msg" class="action-msg"></p>
+                    <div id="invoice-preview" style="display:none; margin-top:16px;">
+                        <p id="invoice-summary" style="font-size:0.85rem; color:var(--text-muted); margin-bottom:12px;"></p>
+                        <h4 style="margin:10px 0 8px;">Cafés</h4>
+                        <div style="overflow-x:auto;">
+                            <table class="data-table" id="invoice-coffees-table">
+                                <thead>
+                                    <tr>
+                                        <th>Nome</th>
+                                        <th>Gramas</th>
+                                        <th>Valor (R$)</th>
+                                        <th>Catálogo</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="invoice-coffees-body"></tbody>
+                            </table>
+                        </div>
+                        <button class="btn btn-outline" id="btn-add-invoice-coffee" style="margin-top:8px; padding:4px 12px; font-size:0.8rem;">+ Adicionar café</button>
+
+                        <h4 style="margin:18px 0 8px;">Custos Extras (frete, embalagem, etc.)</h4>
+                        <div style="overflow-x:auto;">
+                            <table class="data-table" id="invoice-extras-table">
+                                <thead>
+                                    <tr>
+                                        <th>Descrição</th>
+                                        <th>Valor (R$)</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="invoice-extras-body"></tbody>
+                            </table>
+                        </div>
+                        <button class="btn btn-outline" id="btn-add-invoice-extra" style="margin-top:8px; padding:4px 12px; font-size:0.8rem;">+ Adicionar custo extra</button>
+
+                        <div style="margin-top:18px;">
+                            <button class="btn btn-primary" id="btn-commit-invoice" style="padding:8px 20px;">Lançar no Sistema</button>
+                            <p id="invoice-commit-msg" class="action-msg"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-panel admin-card span-2">
+                    <p class="section-title">Histórico de Preço por Dose</p>
+                    <p class="section-sub">Evolução do preço efetivo por dose (último valor de cada dia)</p>
+                    <div class="chart-wrap">
+                        <canvas id="chart-price-history"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: USUÁRIOS ===== -->
+        <div class="tab-panel" id="tab-usuarios">
+            <div class="admin-dashboard">
+                <div class="glass-panel admin-card table-container span-2">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                        <h3>Gestão de Usuários</h3>
+                        <button class="btn btn-outline" id="btn-new-user" style="padding: 5px 15px; font-size: 0.9em; width: auto;">+ Novo Usuário</button>
+                    </div>
+                    <table id="users-table">
+                        <thead>
+                            <tr>
+                                <th>Nome</th>
+                                <th>Matrícula</th>
+                                <th>Saldo</th>
+                                <th>Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-tbody">
+                            <tr><td colspan="4" style="text-align:center;">Carregando...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="glass-panel admin-card table-container span-2">
+                    <h3 style="margin-bottom:15px;">Histórico Global de Transações</h3>
+                    <div style="overflow-x: auto;">
+                        <table id="history-table">
+                            <thead>
+                                <tr>
+                                    <th>Data/Hora</th>
+                                    <th>Usuário</th>
+                                    <th>Matrícula</th>
+                                    <th>Tipo</th>
+                                    <th>Valor</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="history-tbody">
+                                <tr><td colspan="6" style="text-align:center;">Carregando...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: ANÁLISE ===== -->
+        <div class="tab-panel" id="tab-analise">
+            <div class="admin-dashboard">
+                <div class="glass-panel admin-card span-2">
+                    <p class="section-title">Quem não está registrando o consumo</p>
+                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 6px 0 16px;">
+                        Não é possível ver diretamente o café consumido sem registro. Esta análise usa indicadores
+                        — tempo desde o último registro, ritmo histórico × recente e se a pessoa segue ativa
+                        (saldo/recarga) — para apontar quem provavelmente consome mas não lança.
+                    </p>
+                    <div class="kpi-grid">
+                        <div class="kpi-card"><div class="kpi-label">Risco alto</div><div class="kpi-value" id="an-risco-alto" style="color:#f87171;">–</div><div class="kpi-sub">provável consumo sem registro</div></div>
+                        <div class="kpi-card"><div class="kpi-label">Risco médio</div><div class="kpi-value" id="an-risco-medio" style="color:#fbbf24;">–</div><div class="kpi-sub">registro irregular / em queda</div></div>
+                        <div class="kpi-card"><div class="kpi-label">Em dia</div><div class="kpi-value" id="an-ativos" style="color:#4ade80;">–</div><div class="kpi-sub">registrando normalmente</div></div>
+                        <div class="kpi-card"><div class="kpi-label">Sem registro há 30+ dias</div><div class="kpi-value" id="an-sem30">–</div><div class="kpi-sub">já registraram antes</div></div>
+                        <div class="kpi-card"><div class="kpi-label">Nunca registraram</div><div class="kpi-value" id="an-nunca">–</div><div class="kpi-sub">zero consumos lançados</div></div>
+                    </div>
+                </div>
+
+                <div class="glass-panel admin-card table-container span-2">
+                    <h3 style="margin-bottom:15px;">Detalhe por usuário</h3>
+                    <div style="overflow-x:auto;">
+                        <table class="data-table" id="analise-table">
+                            <thead>
+                                <tr>
+                                    <th>Risco</th>
+                                    <th>Nome</th>
+                                    <th>Matrícula</th>
+                                    <th>Situação</th>
+                                    <th title="Dias desde o último consumo registrado">Sem registrar</th>
+                                    <th title="Consumos registrados nos últimos 30 dias">Últ. 30d</th>
+                                    <th title="Ritmo histórico de consumos por semana">Ritmo/sem</th>
+                                    <th title="Consumos esperados em 30 dias mantendo o ritmo">Esperado 30d</th>
+                                    <th>Saldo</th>
+                                </tr>
+                            </thead>
+                            <tbody id="analise-tbody">
+                                <tr><td colspan="9" style="text-align:center;">Carregando...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: CAFÉS ===== -->
+        <div class="tab-panel" id="tab-cafes">
+            <div class="admin-dashboard">
+                <div class="glass-panel admin-card">
+                    <h3 id="coffee-form-title">Adicionar Café</h3>
+                    <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 14px;">
+                        Cadastre os cafés disponíveis. Os usuários poderão avaliá-los e deixar comentários.
+                    </p>
+                    <input type="hidden" id="edit-coffee-id" value="">
+                    <div class="input-group small">
+                        <input type="text" id="coffee-name" placeholder=" ">
+                        <label for="coffee-name">Nome do café</label>
+                    </div>
+                    <div class="input-group small">
+                        <input type="text" id="coffee-origin" placeholder=" ">
+                        <label for="coffee-origin">Origem (opcional)</label>
+                    </div>
+                    <div class="input-group small">
+                        <textarea id="coffee-description" placeholder=" " rows="3" style="resize:vertical; min-height:70px;"></textarea>
+                        <label for="coffee-description">Descrição / notas (opcional)</label>
+                    </div>
+                    <div style="margin: 10px 0;">
+                        <label style="display:block; font-size:0.8rem; color:var(--text-muted); margin-bottom:6px;">Imagem (JPEG/PNG, até 5MB)</label>
+                        <input type="file" id="coffee-image" accept="image/*"
+                            style="width:100%; background: rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.15); border-radius:8px; padding:8px; color:var(--text-primary); font-size:0.85rem;">
+                        <div id="coffee-image-preview-wrap" style="margin-top:10px; display:none; text-align:center;">
+                            <img id="coffee-image-preview" src="" alt="" style="max-width:160px; max-height:160px; border-radius:8px;">
+                            <div>
+                                <button type="button" class="btn btn-outline" id="btn-remove-coffee-image" style="font-size:0.75rem; padding:4px 10px; margin-top:6px;">Remover imagem</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="display:flex; align-items:center; gap:8px; margin: 10px 0;">
+                        <input type="checkbox" id="coffee-active" checked>
+                        <label for="coffee-active" style="font-size:0.9rem;">Ativo (visível para usuários)</label>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn btn-primary" id="btn-save-coffee" style="flex:1;">Salvar Café</button>
+                        <button class="btn btn-outline" id="btn-cancel-coffee" style="flex:0 0 auto; display:none;">Cancelar</button>
+                    </div>
+                    <p id="coffee-form-msg" class="action-msg"></p>
+                </div>
+
+                <div class="glass-panel admin-card span-2">
+                    <p class="section-title">Cafés cadastrados</p>
+                    <p class="section-sub">Clique em um café para ver as avaliações.</p>
+                    <hr class="divider">
+                    <div id="coffees-grid" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap:14px;">
+                        <p style="color:var(--text-muted); font-size:0.85rem;">Carregando...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== TAB: CONFIGURAÇÕES ===== -->
+        <div class="tab-panel" id="tab-config">
+            <div class="admin-dashboard">
+                <div class="glass-panel admin-card">
+                    <h3>Pagamento PIX</h3>
+                    <p style="margin-bottom: 10px; color: var(--text-muted); font-size: 0.9rem;">Configure os dados para recebimento das recargas.</p>
+                    <div class="input-group small">
+                        <input type="text" id="pix-key-input" placeholder=" ">
+                        <label for="pix-key-input">Chave PIX (E-mail, CPF, Celular...)</label>
+                    </div>
+                    <button class="btn btn-primary" id="btn-save-pix" style="margin-bottom: 20px; width: 100%;">Salvar Chave PIX</button>
+                    <div class="qr-container" style="margin: 0 auto 15px auto;">
+                        <img id="admin-qr-preview" src="" alt="QR Atual" style="max-width: 150px; border-radius: 8px;">
+                    </div>
+                    <div class="input-group small">
+                        <input type="file" id="qr-file" accept="image/*" style="padding: 10px 0;">
+                    </div>
+                    <button class="btn btn-secondary" id="btn-upload-qr" style="margin-top: 10px;">Salvar QR Code</button>
+                    <p id="qr-msg" class="action-msg"></p>
+                </div>
+
+                <div class="glass-panel admin-card">
+                    <h3>Café por Dose</h3>
+                    <p style="margin-bottom: 10px; color: var(--text-muted); font-size: 0.9rem;">Quantidade de café (em gramas) consumida em cada dose. Afeta o cálculo do preço por dose.</p>
+                    <div class="input-group small">
+                        <input type="number" id="dose-grams-input" placeholder=" " step="0.1" min="0.1" max="100">
+                        <label for="dose-grams-input">Gramas por dose</label>
+                    </div>
+                    <button class="btn btn-primary" id="btn-save-dose-grams" style="width: 100%;">Salvar</button>
+                    <p id="dose-grams-msg" class="action-msg"></p>
+                </div>
+
+                <div class="glass-panel admin-card">
+                    <h3>Segurança</h3>
+                    <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 20px;">Gerencie o PIN de acesso ao painel administrativo.</p>
+                    <button class="btn btn-outline" id="btn-open-pin-modal-config" style="width:100%;">Alterar PIN de Acesso</button>
+                </div>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 30px;">
+            <a href="/" class="btn btn-outline" style="text-decoration: none; width: auto; padding: 10px 24px;">Ir para a Página Principal</a>
+        </div>
+    </div>
+
+    <!-- Coffee Ratings Modal -->
+    <div class="modal hidden" id="coffee-ratings-modal">
+        <div class="modal-content glass-panel" style="max-height: 90vh; overflow-y: auto; max-width: 560px;">
+            <span class="close-btn" id="close-coffee-ratings">&times;</span>
+            <h2 id="coffee-ratings-title">Avaliações</h2>
+            <div id="coffee-ratings-summary" style="margin: 10px 0 16px 0; color: var(--text-muted); font-size: 0.9rem;"></div>
+            <div id="coffee-ratings-list" style="max-height: 60vh; overflow-y: auto;"></div>
+        </div>
+    </div>
+
+    <!-- New/Edit User Modal -->
+    <div class="modal hidden" id="user-modal">
+        <div class="modal-content glass-panel">
+            <span class="close-btn" id="close-user-modal">&times;</span>
+            <h2 id="user-modal-title">Novo Usuário</h2>
+            <input type="hidden" id="edit-user-id" value="">
+            <div class="input-group small">
+                <input type="text" id="new-user-name" placeholder=" ">
+                <label for="new-user-name">Nome Completo</label>
+            </div>
+            <div class="input-group small">
+                <input type="text" id="new-user-matricula" placeholder=" ">
+                <label for="new-user-matricula">Matrícula (Ex: 12345)</label>
+            </div>
+            <div class="input-group small">
+                <input type="number" id="new-user-balance" placeholder=" " step="0.01" value="0">
+                <label for="new-user-balance">Saldo (R$)</label>
+            </div>
+            <button class="btn btn-primary" id="btn-save-user">Cadastrar Usuário</button>
+            <p id="user-msg" class="action-msg"></p>
+        </div>
+    </div>
+
+    <!-- User Summary Panel -->
+    <div id="user-summary-overlay">
+        <div id="user-summary-panel">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:0.8rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:.06em;">Resumo do Usuário</span>
+                <button id="btn-close-summary" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:1.4rem;line-height:1;padding:0;">&times;</button>
+            </div>
+
+            <!-- Header -->
+            <div class="usr-header">
+                <div class="usr-avatar" id="usr-avatar">?</div>
+                <div>
+                    <div class="usr-name" id="usr-name">—</div>
+                    <div class="usr-meta" id="usr-meta">—</div>
+                </div>
+            </div>
+
+            <!-- Balance -->
+            <div class="usr-balance-box">
+                <div>
+                    <div class="usr-balance-label">Saldo atual</div>
+                    <div class="usr-balance-val" id="usr-balance">R$ —</div>
+                </div>
+                <div style="text-align:right;">
+                    <div class="usr-balance-label">Última transação</div>
+                    <div style="font-size:0.85rem; margin-top:4px;" id="usr-last-tx">—</div>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="usr-stats-grid">
+                <div class="usr-stat">
+                    <div class="usr-stat-label">Consumos</div>
+                    <div class="usr-stat-val" id="usr-total-cons">—</div>
+                </div>
+                <div class="usr-stat">
+                    <div class="usr-stat-label">Total gasto</div>
+                    <div class="usr-stat-val" id="usr-total-val">—</div>
+                </div>
+                <div class="usr-stat">
+                    <div class="usr-stat-label">Recargas</div>
+                    <div class="usr-stat-val" id="usr-total-rec">—</div>
+                </div>
+                <div class="usr-stat">
+                    <div class="usr-stat-label">Total recarregado</div>
+                    <div class="usr-stat-val" id="usr-total-rec-val">—</div>
+                </div>
+            </div>
+
+            <!-- Weekly chart -->
+            <div>
+                <p class="section-title" style="font-size:0.9rem;">Consumos por semana</p>
+                <p class="section-sub" style="margin-bottom:10px;">Últimas 8 semanas</p>
+                <div class="usr-chart-wrap">
+                    <canvas id="chart-user-weekly"></canvas>
+                </div>
+            </div>
+
+            <!-- Recent transactions -->
+            <div>
+                <p class="section-title" style="font-size:0.9rem; margin-bottom:10px;">Transações recentes</p>
+                <div id="usr-tx-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PIN Login Overlay -->
+    <div id="admin-login-overlay" style="
+        position: fixed; inset: 0;
+        background: rgba(15, 23, 42, 0.97);
+        backdrop-filter: blur(12px);
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    ">
+        <div class="glass-panel" style="width: 90%; max-width: 360px; padding: 36px 32px; text-align: center;">
+            <h2 class="logo" style="font-size: 1.8rem; margin-bottom: 6px;">MT <span>Coffee</span></h2>
+            <p style="color: var(--text-muted); margin-bottom: 28px; font-size: 0.9rem;">Acesso restrito — insira o PIN do administrador</p>
+            <form id="pin-form">
+                <div class="input-group small">
+                    <input type="password" id="pin-input" placeholder=" " maxlength="20" inputmode="numeric" autocomplete="current-password">
+                    <label for="pin-input">PIN de administrador</label>
+                </div>
+                <p id="pin-error" style="color: var(--danger); font-size: 0.85rem; min-height: 18px; margin-bottom: 10px;"></p>
+                <a href="/" style="display: block; color: var(--text-muted); font-size: 0.85rem; text-decoration: none; margin-bottom: 12px;">← Ir para a página principal</a>
+                <button type="submit" class="btn btn-primary" id="btn-pin-login">Entrar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Approve Receipt Modal -->
+    <div class="modal hidden" id="approve-receipt-modal">
+        <div class="modal-content glass-panel" style="max-width:520px; width:96%;">
+            <span class="close-btn" id="close-approve-modal">&times;</span>
+            <h2>Aprovar Comprovante</h2>
+            <input type="hidden" id="approve-receipt-id">
+            <div style="margin: 14px 0 8px; background:rgba(255,255,255,0.05); border-radius:10px; padding:12px 14px; font-size:0.9rem; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:4px;">
+                <div><span style="color:var(--text-muted);">Usuário: </span><strong id="approve-user-name">--</strong></div>
+                <div><span style="color:var(--text-muted);">Declarado: </span><strong id="approve-declared-amount" style="color:#f59e0b;">--</strong></div>
+                <a id="approve-view-file" href="#" target="_blank" style="color:#60a5fa; font-size:0.82rem; white-space:nowrap;">Abrir em nova aba ↗</a>
+            </div>
+            <div id="approve-file-preview" style="margin-bottom:12px; border-radius:10px; overflow:hidden; background:rgba(0,0,0,0.3); min-height:60px; display:flex; align-items:center; justify-content:center;">
+                <span style="color:var(--text-muted); font-size:0.85rem;">Carregando comprovante...</span>
+            </div>
+            <div class="input-group small">
+                <input type="number" id="approve-amount-input" step="0.01" min="0.01" placeholder=" ">
+                <label for="approve-amount-input">Valor a Creditar (R$)</label>
+            </div>
+            <p id="approve-msg" style="min-height:18px; font-size:0.85rem; text-align:center; margin-bottom:8px;"></p>
+            <div style="display:flex; gap:10px;">
+                <button type="button" class="btn btn-primary" id="btn-confirm-approve" style="flex:1;">Confirmar Aprovação</button>
+                <button type="button" class="btn" id="btn-confirm-reject" style="flex:0 0 auto; background:#7f1d1d; border-color:#ef4444; color:#fca5a5; padding:0 18px;">Rejeitar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Transaction Modal -->
+    <div class="modal hidden" id="tx-modal">
+        <div class="modal-content glass-panel">
+            <span class="close-btn" id="close-tx-modal">&times;</span>
+            <h2>Editar Transação</h2>
+            <input type="hidden" id="tx-edit-id">
+            <form style="margin-top: 20px;" autocomplete="off">
+                <div class="input-group small">
+                    <select id="tx-edit-user" style="background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 10px; width: 100%; font-size: 0.95rem;">
+                        <option value="">Selecionar usuário...</option>
+                    </select>
+                    <label style="position:static; font-size:0.75rem; color:var(--text-muted); margin-bottom:4px; display:block;">Usuário</label>
+                </div>
+                <div class="input-group small">
+                    <select id="tx-edit-type" style="background: var(--card-bg); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 10px; width: 100%; font-size: 0.95rem;">
+                        <option value="consumption">Consumo</option>
+                        <option value="recharge">Recarga</option>
+                    </select>
+                    <label style="position:static; font-size:0.75rem; color:var(--text-muted); margin-bottom:4px; display:block;">Tipo</label>
+                </div>
+                <div class="input-group small">
+                    <input type="number" id="tx-edit-amount" placeholder=" " min="0" step="0.01">
+                    <label for="tx-edit-amount">Valor (R$)</label>
+                </div>
+                <div class="input-group small">
+                    <input type="datetime-local" id="tx-edit-timestamp" placeholder=" " style="color-scheme: dark;">
+                    <label for="tx-edit-timestamp">Data / Hora</label>
+                </div>
+                <div id="tx-edit-msg" style="min-height:20px; font-size:0.85rem; text-align:center; margin-bottom:8px;"></div>
+                <div style="display:flex; gap:10px;">
+                    <button type="button" class="btn btn-primary" id="btn-save-tx" style="flex:1;">Salvar</button>
+                    <button type="button" class="btn" id="btn-delete-tx" style="flex:0 0 auto; background:#7f1d1d; border-color:#ef4444; color:#fca5a5; padding: 0 18px;">Excluir</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Remessa Modal -->
+    <div class="modal hidden" id="remessa-modal">
+        <div class="modal-content glass-panel">
+            <span class="close-btn" id="close-remessa-modal">&times;</span>
+            <h2>Editar Remessa</h2>
+            <input type="hidden" id="remessa-edit-id">
+            <form style="margin-top: 20px;" autocomplete="off">
+                <div class="input-group small">
+                    <input type="number" id="remessa-edit-grams" placeholder=" " min="1" step="1">
+                    <label for="remessa-edit-grams">Quantidade (g)</label>
+                </div>
+                <div class="input-group small">
+                    <input type="number" id="remessa-edit-cost" placeholder=" " min="0" step="0.01">
+                    <label for="remessa-edit-cost">Custo Total (R$)</label>
+                </div>
+                <div class="input-group small">
+                    <input type="datetime-local" id="remessa-edit-ts" placeholder=" " style="color-scheme: dark;">
+                    <label for="remessa-edit-ts">Data / Hora</label>
+                </div>
+                <div id="remessa-edit-msg" style="min-height:20px; font-size:0.85rem; text-align:center; margin-bottom:8px; color:#f87171;"></div>
+                <button type="button" class="btn btn-primary" id="btn-save-remessa" style="width:100%;">Salvar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Change PIN Modal -->
+    <div class="modal hidden" id="pin-modal">
+        <div class="modal-content glass-panel">
+            <span class="close-btn" id="close-pin-modal">&times;</span>
+            <h2>Alterar PIN</h2>
+            <form style="margin-top: 20px;">
+                <div class="input-group small">
+                    <input type="password" id="current-pin" placeholder=" " autocomplete="current-password">
+                    <label for="current-pin">PIN atual</label>
+                </div>
+                <div class="input-group small">
+                    <input type="password" id="new-pin" placeholder=" " minlength="4" autocomplete="new-password">
+                    <label for="new-pin">Novo PIN (mín. 4 caracteres)</label>
+                </div>
+                <div class="input-group small">
+                    <input type="password" id="confirm-pin" placeholder=" " autocomplete="new-password">
+                    <label for="confirm-pin">Confirmar novo PIN</label>
+                </div>
+                <button type="button" class="btn btn-primary" id="btn-change-pin">Salvar novo PIN</button>
+                <p id="pin-change-msg" class="action-msg"></p>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            const btns = document.querySelectorAll('.tab-btn');
+            const panels = document.querySelectorAll('.tab-panel');
+
+            function switchTab(tabId) {
+                btns.forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
+                panels.forEach(p => p.classList.toggle('active', p.id === 'tab-' + tabId));
+                sessionStorage.setItem('adminTab', tabId);
+                setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+            }
+
+            btns.forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+
+            const saved = sessionStorage.getItem('adminTab');
+            if (saved && document.getElementById('tab-' + saved)) switchTab(saved);
+
+            document.addEventListener('DOMContentLoaded', () => {
+                const cfgPin = document.getElementById('btn-open-pin-modal-config');
+                if (cfgPin) cfgPin.addEventListener('click', () => {
+                    document.getElementById('pin-modal').classList.remove('hidden');
+                });
+            });
+        })();
+    </script>
+    <script src="js/admin.js"></script>
+</body>
+
+</html>

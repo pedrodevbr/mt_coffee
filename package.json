@@ -1,0 +1,32 @@
+{
+  "name": "mt_coffee",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --env-file=.env server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "drizzle-zod": "^0.8.3",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.0.2",
+    "openai": "^6.39.1",
+    "p-limit": "^7.3.0",
+    "p-retry": "^7.1.1",
+    "pg": "^8.19.0",
+    "zod": "^4.4.3",
+    "zod-validation-error": "^5.0.0"
+  }
+}
