@@ -6,6 +6,25 @@ const path = require('path');
 // Supabase, Render) e recusado por um Postgres local. Detecta pela URL em vez
 // de fixar em um provedor; PGSSLMODE=disable/require força manualmente.
 const DATABASE_URL = process.env.DATABASE_URL || '';
+
+// Sem a URL o pg cai no fallback de PGHOST e falha com um ENOTFOUND obscuro,
+// apontando para um host que não tem nada a ver com o banco configurado.
+if (!DATABASE_URL) {
+    console.error(
+        'DATABASE_URL não definida. Configure a connection string do Postgres ' +
+        'antes de iniciar (veja DEPLOY.md).'
+    );
+    process.exit(1);
+}
+if (!/^postgres(ql)?:\/\//.test(DATABASE_URL)) {
+    console.error(
+        'DATABASE_URL não parece uma connection string do Postgres ' +
+        '(esperado começar com postgresql://). Valor recebido começa com: ' +
+        JSON.stringify(DATABASE_URL.slice(0, 12))
+    );
+    process.exit(1);
+}
+
 const isLocalDb = /@(localhost|127\.0\.0\.1|\[::1\])/.test(DATABASE_URL);
 
 let useSsl = !isLocalDb;
