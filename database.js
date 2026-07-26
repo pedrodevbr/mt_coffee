@@ -31,6 +31,20 @@ let useSsl = !isLocalDb;
 if (process.env.PGSSLMODE === 'disable') useSsl = false;
 if (process.env.PGSSLMODE === 'require') useSsl = true;
 
+// Fora de produção, deixa explícito em qual banco você caiu. Rodar local achando
+// que está num branch e estar na produção é o erro caro deste setup.
+if (process.env.NODE_ENV !== 'production') {
+    try {
+        const u = new URL(DATABASE_URL);
+        console.log(`[db] conectando em ${u.hostname}${u.pathname}`);
+        if (process.env.PROD_DB_HOST && u.hostname === process.env.PROD_DB_HOST) {
+            console.warn('[db] ATENÇÃO: este é o banco de PRODUÇÃO. Toda escrita afeta dados reais.');
+        }
+    } catch {
+        // URL malformada já teria sido barrada acima; não vale derrubar o boot aqui.
+    }
+}
+
 const pool = new Pool({
     connectionString: DATABASE_URL,
     ssl: useSsl ? { rejectUnauthorized: false } : false
