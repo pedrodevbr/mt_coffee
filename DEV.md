@@ -38,7 +38,22 @@ caso você aponte para ele sem querer:
 PROD_DB_HOST=ep-misty-mouse-ajt4x1xu.c-3.us-east-2.aws.neon.tech
 ```
 
-## 3. Rodar
+## 3. Conferir antes de rodar
+
+```bash
+npm run db:check
+```
+
+Mostra o host, a base e a contagem de linhas por tabela. Use isto para ter
+certeza de que está no branch `dev` — as URLs de dev e produção no Neon são quase
+idênticas, diferindo só no trecho `ep-...`, e é aí que o erro acontece.
+
+Referência do que produção tinha na migração: `users` 20, `transactions` 707,
+`payment_receipts` 20, `coffees` 3, `stock_history` 10, `stock_adjustments` 10,
+`price_history` 8, `settings` 4, `coffee_ratings` 3, `system_state` 1,
+`extra_costs` 0. Um branch recém-criado deve bater com isso.
+
+## 4. Rodar
 
 ```bash
 npm run dev
