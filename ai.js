@@ -1,29 +1,29 @@
-const OpenAI = require('openai');
+const { GoogleGenAI } = require('@google/genai');
 
-// Aceita a chave da OpenAI direto (OPENAI_API_KEY) ou, se ainda houver,
-// as variáveis da integração do Replit. baseURL só é passada se existir,
-// senão o SDK usa o endpoint padrão da OpenAI.
-const API_KEY = process.env.OPENAI_API_KEY || process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-const BASE_URL = process.env.OPENAI_BASE_URL || process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+// Aceita a chave do Google Gemini (GEMINI_API_KEY) ou Google AI Studio
+const API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
 
-const openai = API_KEY
-    ? new OpenAI({ apiKey: API_KEY, ...(BASE_URL ? { baseURL: BASE_URL } : {}) })
-    : null;
+let aiClient = null;
+if (API_KEY) {
+    try {
+        aiClient = new GoogleGenAI({ apiKey: API_KEY });
+    } catch (err) {
+        console.error('[ai] Erro ao inicializar cliente Google Gemini:', err.message);
+    }
+}
 
-if (!openai) {
-    console.warn('[ai] OPENAI_API_KEY não definida — análise automática de comprovantes e notas fiscais fica desativada.');
+if (!aiClient) {
+    console.warn('[ai] GEMINI_API_KEY não definida — análise automática de comprovantes e notas fiscais fica desativada.');
 }
 
 function requireClient() {
-    if (!openai) throw new Error('OPENAI_API_KEY não configurada.');
-    return openai;
+    if (!aiClient) {
+        throw new Error('GEMINI_API_KEY não configurada. Configure a variável GEMINI_API_KEY para habilitar a IA.');
+    }
+    return aiClient;
 }
 
-const VISION_MODEL = process.env.OPENAI_VISION_MODEL || 'gpt-5.4';
-
-function bufferToDataUrl(buffer, mimeType) {
-    return `data:${mimeType};base64,${buffer.toString('base64')}`;
-}
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.6-flash';
 
 function isSupportedImage(mimeType) {
     return typeof mimeType === 'string' && mimeType.startsWith('image/');
@@ -38,83 +38,103 @@ function isSupportedDocument(mimeType) {
     return isSupportedImage(mimeType) || isPdf(mimeType);
 }
 
-// Build the right content part for the model: images go through image_url,
-// PDFs go through the file content type (file_data data URL).
-function buildDocumentContent(buffer, mimeType, filename) {
-    const dataUrl = bufferToDataUrl(buffer, mimeType);
-    if (isPdf(mimeType)) {
-        return { type: 'file', file: { filename: filename || 'documento.pdf', file_data: dataUrl } };
+function cleanJsonResponse(text) {
+    if (!text) return '{}';
+    let cleaned = text.trim();
+    if (cleaned.startsWith('```json')) {
+        cleaned = cleaned.replace(/^```json\s*/i, '').replace(/\s*```$/, '');
+    } else if (cleaned.startsWith('```')) {
+        cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
     }
-    return { type: 'image_url', image_url: { url: dataUrl } };
+    return cleaned.trim();
 }
 
 // Analyze a PIX/bank payment receipt image and extract the paid amount.
 // Returns: { is_payment_proof, amount (number|null), confidence ('high'|'medium'|'low'), summary }
 async function analyzeReceipt(buffer, mimeType, filename) {
-    const docContent = buildDocumentContent(buffer, mimeType, filename);
-    const completion = await requireClient().chat.completions.create({
-        model: VISION_MODEL,
-        response_format: { type: 'json_object' },
-        messages: [
+    const client = requireClient();
+
+    const prompt = 'Você é um analista financeiro que lê comprovantes de pagamento PIX e transferências bancárias brasileiras.\n'
+        + 'Analise este comprovante de pagamento e retorne SOMENTE um JSON com exatamente estas chaves:\n'
+        + '{\n'
+        + '  "is_payment_proof": boolean (true se for realmente um comprovante de pagamento/transferência/PIX realizado com sucesso),\n'
+        + '  "amount": number|null (o valor pago em reais, apenas o número puro, ex: 25.50),\n'
+        + '  "confidence": "high"|"medium"|"low" (sua confiança na leitura do valor),\n'
+        + '  "summary": string (resumo curto em português: tipo de transação, data e destinatário se visíveis)\n'
+        + '}\n'
+        + 'Se não conseguir ler o valor com clareza, use amount null e confidence "low". Retorne apenas o JSON puro.';
+
+    const response = await client.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: [
             {
-                role: 'system',
-                content: 'Você é um analista financeiro que lê comprovantes de pagamento PIX e transferências bancárias brasileiras. Responda SOMENTE com JSON válido.'
+                inlineData: {
+                    mimeType: mimeType || 'image/jpeg',
+                    data: buffer.toString('base64')
+                }
             },
-            {
-                role: 'user',
-                content: [
-                    {
-                        type: 'text',
-                        text: 'Analise este comprovante de pagamento. Retorne um JSON com exatamente estas chaves: '
-                            + '{"is_payment_proof": boolean (true se for realmente um comprovante de pagamento/transferência/PIX), '
-                            + '"amount": number|null (o valor pago em reais, apenas o número, ex: 25.5), '
-                            + '"confidence": "high"|"medium"|"low" (sua confiança na leitura do valor), '
-                            + '"summary": string (resumo curto em português: tipo de transação, data e destinatário se visíveis)}. '
-                            + 'Se não conseguir ler o valor com clareza, use amount null e confidence "low".'
-                    },
-                    docContent
-                ]
-            }
-        ]
+            prompt
+        ],
+        config: {
+            responseMimeType: 'application/json'
+        }
     });
-    return JSON.parse(completion.choices[0].message.content);
+
+    const text = response.text || '';
+    return JSON.parse(cleanJsonResponse(text));
 }
 
 // Analyze a coffee purchase invoice (nota fiscal) image.
 // existingCoffees: [{ id, name, origin }]
 // Returns: { coffees: [{name, grams, value, matched_coffee_id}], extras: [{description, amount}], summary }
 async function analyzeInvoice(buffer, mimeType, existingCoffees, filename) {
-    const docContent = buildDocumentContent(buffer, mimeType, filename);
+    const client = requireClient();
+
     const catalog = (existingCoffees || [])
         .map(c => `id=${c.id}: ${c.name}${c.origin ? ' (' + c.origin + ')' : ''}`)
         .join('\n') || '(catálogo vazio)';
 
-    const completion = await requireClient().chat.completions.create({
-        model: VISION_MODEL,
-        response_format: { type: 'json_object' },
-        messages: [
+    const prompt = 'Você lê notas fiscais e cupons brasileiros de compra de café e extrai os itens de forma estruturada.\n\n'
+        + 'Catálogo de cafés já cadastrados no sistema (use para casar itens iguais se aplicável):\n'
+        + catalog + '\n\n'
+        + 'Analise esta nota fiscal e retorne SOMENTE um JSON com exatamente estas chaves:\n'
+        + '{\n'
+        + '  "coffees": [\n'
+        + '    {\n'
+        + '      "name": string (nome do café),\n'
+        + '      "grams": number|null (peso TOTAL deste item em GRAMAS, converta kg para gramas multiplicando por 1000),\n'
+        + '      "value": number (valor TOTAL pago neste item em reais),\n'
+        + '      "matched_coffee_id": number|null (o id do catálogo acima se for claramente o mesmo café, senão null)\n'
+        + '    }\n'
+        + '  ],\n'
+        + '  "extras": [\n'
+        + '    {\n'
+        + '      "description": string,\n'
+        + '      "amount": number\n'
+        + '    }\n'
+        + '  ] (itens que NÃO são café, como frete, embalagem, taxas e impostos destacados),\n'
+        + '  "summary": string (resumo curto em português da nota fiscal)\n'
+        + '}\n'
+        + 'Inclua em "coffees" apenas itens que são café. Se o peso não estiver visível, use grams null. Retorne apenas o JSON puro.';
+
+    const response = await client.models.generateContent({
+        model: GEMINI_MODEL,
+        contents: [
             {
-                role: 'system',
-                content: 'Você lê notas fiscais brasileiras de compra de café e extrai os itens de forma estruturada. Responda SOMENTE com JSON válido.'
+                inlineData: {
+                    mimeType: mimeType || 'image/jpeg',
+                    data: buffer.toString('base64')
+                }
             },
-            {
-                role: 'user',
-                content: [
-                    {
-                        type: 'text',
-                        text: 'Catálogo de cafés já cadastrado (use para casar itens iguais):\n' + catalog + '\n\n'
-                            + 'Analise esta nota fiscal e retorne um JSON com exatamente estas chaves: '
-                            + '{"coffees": [{"name": string (nome do café), "grams": number|null (peso TOTAL deste item em GRAMAS, converta kg para gramas multiplicando por 1000), "value": number (valor TOTAL pago neste item em reais), "matched_coffee_id": number|null (o id do catálogo acima se for claramente o mesmo café, senão null)}], '
-                            + '"extras": [{"description": string, "amount": number}] (itens que NÃO são café, como frete, embalagem, taxas e impostos destacados), '
-                            + '"summary": string (resumo curto em português da nota)}. '
-                            + 'Inclua em "coffees" apenas itens que são café. Se o peso não estiver visível, use grams null.'
-                    },
-                    docContent
-                ]
-            }
-        ]
+            prompt
+        ],
+        config: {
+            responseMimeType: 'application/json'
+        }
     });
-    return JSON.parse(completion.choices[0].message.content);
+
+    const text = response.text || '';
+    return JSON.parse(cleanJsonResponse(text));
 }
 
 module.exports = { analyzeReceipt, analyzeInvoice, isSupportedImage, isSupportedDocument };

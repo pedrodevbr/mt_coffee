@@ -202,129 +202,147 @@
         </main>
 
         <!-- Recharge Modal -->
+        <!-- Recharge Modal -->
         <div class="modal hidden" id="recharge-modal">
             <div
                 class="modal-content glass-panel"
-                style="max-height: 90vh; overflow-y: auto"
+                style="max-height: 90vh; overflow-y: auto; max-width: 440px;"
             >
                 <span class="close-btn" id="close-modal">&times;</span>
-                <h2>Recarregar Saldo</h2>
-                <p class="modal-desc">
-                    Escaneie o QR Code ou use a chave PIX para fazer o
-                    pagamento. Depois, envie o comprovante abaixo.
+                <h2 style="margin-bottom: 6px;">Recarregar Saldo</h2>
+                <p class="modal-desc" style="margin-bottom: 16px;">
+                    Escolha como deseja adicionar saldo à sua conta:
                 </p>
 
-                <div
-                    id="pix-key-display"
-                    style="
-                        text-align: center;
-                        margin-bottom: 15px;
-                        background: rgba(255, 255, 255, 0.1);
-                        padding: 10px;
-                        border-radius: 8px;
-                        display: none;
-                    "
-                >
-                    <span
+                <!-- Tabs -->
+                <div style="display: flex; gap: 8px; margin-bottom: 18px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 8px;">
+                    <button id="tab-btn-pix-auto" class="btn" style="flex: 1; padding: 8px 12px; font-size: 0.88rem; background: var(--accent); color: #fff; border-radius: 8px; font-weight: 600;">
+                        ⚡ PIX Instantâneo
+                    </button>
+                    <button id="tab-btn-pix-manual" class="btn" style="flex: 1; padding: 8px 12px; font-size: 0.88rem; background: rgba(255,255,255,0.06); color: var(--text-muted); border-radius: 8px;">
+                        📄 Comprovante Manual
+                    </button>
+                </div>
+
+                <!-- Tab 1: PIX Automático / Dinâmico -->
+                <div id="recharge-panel-auto">
+                    <div id="pix-amount-step">
+                        <label style="font-size: 0.85rem; color: var(--text-muted); display: block; margin-bottom: 8px;">
+                            Selecione ou digite o valor:
+                        </label>
+                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 12px;">
+                            <button type="button" class="btn btn-quick-amt" data-amount="5" style="padding: 8px 4px; font-size: 0.85rem; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: var(--text-primary);">R$ 5</button>
+                            <button type="button" class="btn btn-quick-amt" data-amount="10" style="padding: 8px 4px; font-size: 0.85rem; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: var(--text-primary);">R$ 10</button>
+                            <button type="button" class="btn btn-quick-amt" data-amount="20" style="padding: 8px 4px; font-size: 0.85rem; background: var(--accent); border: 1px solid var(--accent); border-radius: 6px; color: #fff; font-weight: 600;">R$ 20</button>
+                            <button type="button" class="btn btn-quick-amt" data-amount="50" style="padding: 8px 4px; font-size: 0.85rem; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: var(--text-primary);">R$ 50</button>
+                        </div>
+                        <div style="margin-bottom: 14px;">
+                            <div style="position: relative;">
+                                <span style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-weight: 600;">R$</span>
+                                <input type="number" id="pix-custom-amount" step="0.50" min="0.50" value="20.00" style="width: 100%; padding: 10px 10px 10px 38px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.2); border-radius: 8px; color: var(--text-primary); font-size: 1.1rem; font-weight: bold;" />
+                            </div>
+                        </div>
+                        <button id="btn-generate-pix" class="btn btn-primary" style="width: 100%; padding: 12px; font-size: 1rem; font-weight: 600; background: #10b981; border: none; border-radius: 8px; color: #fff; cursor: pointer;">
+                            Gerar QR Code PIX
+                        </button>
+                        <p id="pix-error-msg" style="color: var(--danger); font-size: 0.85rem; text-align: center; margin-top: 8px; display: none;"></p>
+                    </div>
+
+                    <!-- Visualização do QR Code Gerado -->
+                    <div id="pix-display-step" style="display: none; text-align: center;">
+                        <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 8px; margin-bottom: 12px;">
+                            <span style="font-size: 0.8rem; color: #34d399;">Valor a pagar:</span>
+                            <div id="pix-display-amount" style="font-size: 1.4rem; font-weight: bold; color: #10b981;">R$ 20,00</div>
+                        </div>
+
+                        <div style="background: #fff; padding: 12px; border-radius: 12px; display: inline-block; margin-bottom: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">
+                            <img id="pix-dynamic-qr" src="" alt="QR Code PIX" style="width: 190px; height: 190px; display: block;" />
+                        </div>
+
+                        <div style="margin-bottom: 14px;">
+                            <label style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 4px;">PIX Copia e Cola:</label>
+                            <div style="display: flex; gap: 6px;">
+                                <input type="text" id="pix-copy-paste-input" readonly style="flex: 1; padding: 8px; font-size: 0.78rem; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: var(--text-primary); text-overflow: ellipsis;" />
+                                <button type="button" id="btn-copy-pix" class="btn" style="padding: 8px 12px; font-size: 0.8rem; background: var(--accent); color: #fff; border-radius: 6px; white-space: nowrap;">
+                                    Copiar
+                                </button>
+                            </div>
+                        </div>
+
+                        <div style="display: flex; align-items: center; justify-content: center; gap: 8px; color: #60a5fa; font-size: 0.85rem; margin-bottom: 14px;">
+                            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #60a5fa; animation: pulse 1.5s infinite;"></span>
+                            Aguardando pagamento no banco...
+                        </div>
+
+                        <button type="button" id="btn-cancel-pix" class="btn" style="background: none; border: none; color: var(--text-muted); font-size: 0.82rem; cursor: pointer;">
+                            ← Alterar valor
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Tab 2: Comprovante Manual -->
+                <div id="recharge-panel-manual" style="display: none;">
+                    <div
+                        id="pix-key-display"
                         style="
-                            font-size: 0.8rem;
-                            color: var(--text-muted);
-                            display: block;
+                            text-align: center;
+                            margin-bottom: 12px;
+                            background: rgba(255, 255, 255, 0.08);
+                            padding: 8px;
+                            border-radius: 8px;
                         "
-                        >Chave PIX:</span
                     >
-                    <strong
-                        id="pix-key-value"
-                        style="word-break: break-all"
-                    ></strong>
-                </div>
+                        <span style="font-size: 0.78rem; color: var(--text-muted); display: block;">Chave PIX da Empresa:</span>
+                        <strong id="pix-key-value" style="word-break: break-all; font-size: 0.9rem;"></strong>
+                    </div>
 
-                <div class="qr-container">
-                    <img
-                        id="pix-qr"
-                        src="/assets/qr_placeholder.png"
-                        alt="PIX QR Code"
-                        onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'200\' height=\'200\'><rect width=\'200\' height=\'200\' fill=\'%23333\'/><text x=\'50%\' y=\'50%\' fill=\'white\' font-family=\'sans-serif\' font-size=\'14\' text-anchor=\'middle\' dominant-baseline=\'middle\'>Sem QR Cadastrado</text></svg>'"
-                    />
-                </div>
+                    <div class="qr-container" style="margin-bottom: 10px;">
+                        <img
+                            id="pix-qr"
+                            src="/assets/qr_placeholder.png"
+                            alt="PIX QR Code"
+                            style="max-width: 140px; border-radius: 8px;"
+                            onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'140\' height=\'140\'><rect width=\'140\' height=\'140\' fill=\'%23333\'/><text x=\'50%\' y=\'50%\' fill=\'white\' font-family=\'sans-serif\' font-size=\'12\' text-anchor=\'middle\' dominant-baseline=\'middle\'>Sem QR Cadastrado</text></svg>'"
+                        />
+                    </div>
 
-                <div
-                    id="download-qr-container"
-                    style="
-                        text-align: center;
-                        margin-bottom: 15px;
-                        display: none;
-                    "
-                >
-                    <a
-                        id="btn-download-qr"
-                        class="btn btn-outline"
-                        style="
-                            font-size: 0.8rem;
-                            padding: 5px 15px;
-                            text-decoration: none;
-                        "
-                        download="pix-qr-coffee.png"
-                        target="_blank"
-                        >Baixar QR Code</a
-                    >
-                </div>
+                    <p style="font-size: 0.82rem; color: var(--text-muted); text-align: center; margin-bottom: 8px;">
+                        Envie o comprovante para leitura com IA:
+                    </p>
 
-                <hr
-                    style="
-                        border-color: rgba(255, 255, 255, 0.1);
-                        margin: 20px 0;
-                    "
-                />
-                <p
-                    style="
-                        font-size: 0.85rem;
-                        color: var(--text-muted);
-                        text-align: center;
-                        margin-bottom: 12px;
-                    "
-                >
-                    Envie o comprovante do pagamento:
-                </p>
+                    <div style="margin-bottom: 10px">
+                        <input
+                            type="file"
+                            id="receipt-file"
+                            accept="image/*,application/pdf"
+                            style="
+                                width: 100%;
+                                background: rgba(255, 255, 255, 0.05);
+                                border: 1px solid rgba(255, 255, 255, 0.2);
+                                border-radius: 8px;
+                                padding: 8px;
+                                color: var(--text-primary);
+                                font-size: 0.85rem;
+                                cursor: pointer;
+                            "
+                        />
+                    </div>
 
-                <div style="margin-bottom: 14px">
-                
-                    <input
-                        type="file"
-                        id="receipt-file"
-                        accept="image/*,application/pdf"
+                    <p id="receipt-upload-msg" style="min-height: 16px; font-size: 0.82rem; text-align: center; margin-bottom: 6px;"></p>
+                    <button
+                        class="btn btn-secondary"
+                        id="btn-confirm-recharge"
                         style="
                             width: 100%;
-                            background: rgba(255, 255, 255, 0.05);
+                            background: rgba(255, 255, 255, 0.08);
                             border: 1px solid rgba(255, 255, 255, 0.2);
-                            border-radius: 8px;
                             padding: 10px;
-                            color: var(--text-primary);
-                            font-size: 0.9rem;
-                            cursor: pointer;
+                            border-radius: 8px;
                         "
-                    />
+                    >
+                        Enviar Comprovante
+                    </button>
                 </div>
-
-                <p
-                    id="receipt-upload-msg"
-                    style="
-                        min-height: 18px;
-                        font-size: 0.85rem;
-                        text-align: center;
-                        margin-bottom: 8px;
-                    "
-                ></p>
-                <button
-                    class="btn btn-secondary"
-                    id="btn-confirm-recharge"
-                    style="
-                        background: rgba(255, 255, 255, 0.08);
-                        border: 1px solid rgba(255, 255, 255, 0.2);
-                    "
-                >
-                    Enviar Comprovante
-                </button>
 
                 <!-- User's receipts status -->
                 <div

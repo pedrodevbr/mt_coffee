@@ -8,6 +8,8 @@ const jwt = require('jsonwebtoken');
 const { pool, initSchema } = require('./database');
 const { withTransaction, recalculate, recalculateWithExtrasReset, applyConsumption } = require('./cost-engine');
 const { analyzeReceipt, analyzeInvoice, isSupportedDocument } = require('./ai');
+const paymentGateway = require('./payment-gateway');
+const telegram = require('./telegram');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -477,6 +479,104 @@ app.get('/api/users', requireAdmin, async (req, res) => {
     }
 });
 
+// =====================
+//  INTEGRAÇÕES ADMIN (MERCADO PAGO & TELEGRAM)
+// =====================
+app.get('/api/admin/integrations', requireAdmin, async (req, res) => {
+    try {
+        const resSettings = await pool.query(
+            "SELECT key, value FROM settings WHERE key IN ('mp_access_token', 'telegram_bot_token', 'telegram_chat_id', 'low_stock_threshold_grams')"
+        );
+        const map = {};
+        resSettings.rows.forEach(r => { map[r.key] = r.value; });
+
+        const mpToken = map['mp_access_token'] || process.env.MP_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN || '';
+        const tgToken = map['telegram_bot_token'] || process.env.TELEGRAM_BOT_TOKEN || '';
+        const tgChat = map['telegram_chat_id'] || process.env.TELEGRAM_CHAT_ID || '';
+        const lowStock = map['low_stock_threshold_grams'] || '200';
+
+        res.json({
+            mp_configured: Boolean(mpToken),
+            mp_masked: mpToken ? (mpToken.slice(0, 10) + '...' + mpToken.slice(-4)) : '',
+            telegram_configured: Boolean(tgToken && tgChat),
+            telegram_bot_masked: tgToken ? (tgToken.slice(0, 8) + '...' + tgToken.slice(-4)) : '',
+            telegram_chat_id: tgChat,
+            low_stock_threshold_grams: parseFloat(lowStock) || 200
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/admin/integrations', requireAdmin, async (req, res) => {
+    try {
+        const { mp_access_token, telegram_bot_token, telegram_chat_id, low_stock_threshold_grams } = req.body;
+
+        if (mp_access_token !== undefined) {
+            await pool.query(
+                `INSERT INTO settings (key, value) VALUES ('mp_access_token', $1)
+                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+                [mp_access_token.trim()]
+            );
+        }
+        if (telegram_bot_token !== undefined) {
+            await pool.query(
+                `INSERT INTO settings (key, value) VALUES ('telegram_bot_token', $1)
+                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+                [telegram_bot_token.trim()]
+            );
+        }
+        if (telegram_chat_id !== undefined) {
+            await pool.query(
+                `INSERT INTO settings (key, value) VALUES ('telegram_chat_id', $1)
+                 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+                [telegram_chat_id.trim()]
+            );
+        }
+        if (low_stock_threshold_grams !== undefined) {
+            const grams = parseFloat(low_stock_threshold_grams);
+            if (!isNaN(grams) && grams > 0) {
+                await pool.query(
+                    `INSERT INTO settings (key, value) VALUES ('low_stock_threshold_grams', $1)
+                     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+                    [String(grams)]
+                );
+            }
+        }
+
+        res.json({ success: true, message: 'Configurações de integração atualizadas com sucesso!' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/admin/telegram/test', requireAdmin, async (req, res) => {
+    try {
+        const config = await telegram.getTelegramConfig(pool);
+        if (!config.botToken || !config.chatId) {
+            return res.status(400).json({ error: 'Token do Bot ou Chat ID do Telegram não configurados.' });
+        }
+
+        const text = `🤖 <b>Teste de Conexão — MT Coffee</b> ☕\n\n`
+            + `O bot do Telegram foi conectado com sucesso ao sistema MT Coffee!\n`
+            + `Você receberá avisos automáticos de estoque baixo (≤ ${config.thresholdGrams}g) e notificações de recargas neste chat.`;
+
+        const sendRes = await telegram.sendTelegramMessage({
+            botToken: config.botToken,
+            chatId: config.chatId,
+            text
+        });
+
+        if (sendRes.success) {
+            res.json({ success: true, message: 'Mensagem de teste enviada com sucesso para o Telegram!' });
+        } else {
+            res.status(400).json({ error: sendRes.error || 'Falha ao enviar mensagem de teste.' });
+        }
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.put('/api/users/:id', requireAdmin, async (req, res) => {
     try {
         const { name, matricula, balance } = req.body;
@@ -565,9 +665,181 @@ app.post('/api/consume', async (req, res) => {
 
             return { new_balance: user.balance - deduction.priceCharged, cost: deduction.priceCharged };
         });
+
+        // Dispara verificação de estoque baixo no Telegram em segundo plano
+        pool.query('SELECT coffee_stock_grams, current_price_per_dose FROM system_state ORDER BY id DESC LIMIT 1')
+            .then(stRes => {
+                if (stRes.rows.length) {
+                    telegram.checkAndAlertLowStock({
+                        pool,
+                        remainingGrams: stRes.rows[0].coffee_stock_grams,
+                        currentPrice: stRes.rows[0].current_price_per_dose
+                    });
+                }
+            }).catch(() => {});
+
         res.json({ success: true, message: 'Coffee consumed!', ...result });
     } catch (err) {
         res.status(err.status || 500).json({ error: err.message });
+    }
+});
+
+// =====================
+//  PIX DINÂMICO & WEBHOOKS
+// =====================
+app.get('/api/pix/config', async (req, res) => {
+    try {
+        const settingRes = await pool.query("SELECT value FROM settings WHERE key = 'mp_access_token'");
+        const mpToken = settingRes.rows.length ? settingRes.rows[0].value : null;
+        res.json({
+            enabled: paymentGateway.isConfigured(mpToken)
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/pix/create', async (req, res) => {
+    try {
+        const { matricula, amount } = req.body;
+        if (!matricula) return res.status(400).json({ error: 'Matrícula é obrigatória.' });
+        const numAmount = parseFloat(amount);
+        if (isNaN(numAmount) || numAmount < 0.50) {
+            return res.status(400).json({ error: 'Valor mínimo para recarga via PIX é R$ 0,50.' });
+        }
+
+        const userRes = await pool.query('SELECT id, name, matricula FROM users WHERE matricula = $1', [matricula]);
+        if (userRes.rows.length === 0) return res.status(404).json({ error: 'Usuário não encontrado.' });
+        const user = userRes.rows[0];
+
+        const settingRes = await pool.query("SELECT value FROM settings WHERE key = 'mp_access_token'");
+        const settingsToken = settingRes.rows.length ? settingRes.rows[0].value : null;
+
+        const pixData = await paymentGateway.createPixPayment({
+            userId: user.id,
+            matricula: user.matricula,
+            name: user.name,
+            amount: numAmount,
+            settingsToken
+        });
+
+        await pool.query(
+            `INSERT INTO pix_charges (payment_id, user_id, matricula, amount, status, qr_code, qr_code_base64, ticket_url)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [pixData.payment_id, user.id, user.matricula, numAmount, pixData.status, pixData.qr_code, pixData.qr_code_base64, pixData.ticket_url]
+        );
+
+        res.json({
+            success: true,
+            payment_id: pixData.payment_id,
+            status: pixData.status,
+            amount: pixData.amount,
+            qr_code: pixData.qr_code,
+            qr_code_base64: pixData.qr_code_base64,
+            ticket_url: pixData.ticket_url,
+            expires_at: pixData.expires_at
+        });
+    } catch (err) {
+        console.error('[pix] Erro ao criar cobrança:', err.message);
+        res.status(500).json({ error: err.message || 'Erro ao gerar PIX.' });
+    }
+});
+
+app.get('/api/pix/status/:paymentId', async (req, res) => {
+    try {
+        const { paymentId } = req.params;
+        const chargeRes = await pool.query('SELECT * FROM pix_charges WHERE payment_id = $1', [paymentId]);
+        if (chargeRes.rows.length === 0) {
+            return res.status(404).json({ error: 'Cobrança não encontrada.' });
+        }
+        const charge = chargeRes.rows[0];
+
+        // Se já está aprovado no banco, retorna imediatamente
+        if (charge.status === 'approved') {
+            const userRes = await pool.query('SELECT balance FROM users WHERE id = $1', [charge.user_id]);
+            return res.json({
+                status: 'approved',
+                paid: true,
+                amount: charge.amount,
+                new_balance: userRes.rows[0]?.balance
+            });
+        }
+
+        // Caso contrário, consulta no Mercado Pago para verificar status
+        const settingRes = await pool.query("SELECT value FROM settings WHERE key = 'mp_access_token'");
+        const settingsToken = settingRes.rows.length ? settingRes.rows[0].value : null;
+        const mpStatus = await paymentGateway.getPaymentStatus(paymentId, settingsToken).catch(() => null);
+
+        if (mpStatus && mpStatus.status === 'approved') {
+            let updatedBalance = null;
+            await withTransaction(async (client) => {
+                const check = await client.query('SELECT status, user_id, amount, matricula FROM pix_charges WHERE payment_id = $1 FOR UPDATE', [paymentId]);
+                if (check.rows.length > 0 && check.rows[0].status !== 'approved') {
+                    await client.query('UPDATE pix_charges SET status = $1, paid_at = NOW() WHERE payment_id = $2', ['approved', paymentId]);
+                    await client.query('INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, $3)', [charge.user_id, charge.amount, 'recharge']);
+                    const u = await client.query('UPDATE users SET balance = balance + $1 WHERE id = $2 RETURNING balance, name', [charge.amount, charge.user_id]);
+                    updatedBalance = u.rows[0]?.balance;
+
+                    telegram.notifyRecharge({
+                        pool,
+                        userName: u.rows[0]?.name,
+                        matricula: charge.matricula,
+                        amount: charge.amount,
+                        method: 'PIX Dinâmico (Mercado Pago)'
+                    }).catch(() => {});
+                }
+            });
+
+            return res.json({
+                status: 'approved',
+                paid: true,
+                amount: charge.amount,
+                new_balance: updatedBalance
+            });
+        }
+
+        res.json({
+            status: mpStatus?.status || charge.status,
+            paid: false,
+            amount: charge.amount
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/webhooks/mercadopago', async (req, res) => {
+    try {
+        const paymentId = req.query['data.id'] || req.body?.data?.id || (req.body?.type === 'payment' ? req.body?.data?.id : null) || req.body?.id;
+        if (paymentId) {
+            const settingRes = await pool.query("SELECT value FROM settings WHERE key = 'mp_access_token'");
+            const settingsToken = settingRes.rows.length ? settingRes.rows[0].value : null;
+            const mpStatus = await paymentGateway.getPaymentStatus(String(paymentId), settingsToken).catch(() => null);
+
+            if (mpStatus && mpStatus.status === 'approved') {
+                await withTransaction(async (client) => {
+                    const check = await client.query('SELECT status, user_id, amount, matricula FROM pix_charges WHERE payment_id = $1 FOR UPDATE', [String(paymentId)]);
+                    if (check.rows.length > 0 && check.rows[0].status !== 'approved') {
+                        const charge = check.rows[0];
+                        await client.query('UPDATE pix_charges SET status = $1, paid_at = NOW() WHERE payment_id = $2', ['approved', String(paymentId)]);
+                        await client.query('INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, $3)', [charge.user_id, charge.amount, 'recharge']);
+                        const u = await client.query('UPDATE users SET balance = balance + $1 WHERE id = $2 RETURNING balance, name', [charge.amount, charge.user_id]);
+
+                        telegram.notifyRecharge({
+                            pool,
+                            userName: u.rows[0]?.name,
+                            matricula: charge.matricula,
+                            amount: charge.amount,
+                            method: 'PIX Dinâmico (Mercado Pago)'
+                        }).catch(() => {});
+                    }
+                });
+            }
+        }
+        res.status(200).send('OK');
+    } catch (err) {
+        console.warn('[webhook] Erro ao processar:', err.message);
+        res.status(200).send('OK');
     }
 });
 
@@ -749,7 +1021,15 @@ app.post('/api/receipts', uploadReceipt.single('comprovante'), async (req, res) 
                             [aiAmount, receiptId]
                         );
                         await client.query('INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, $3)', [userId, aiAmount, 'recharge']);
-                        await client.query('UPDATE users SET balance = balance + $1 WHERE id = $2', [aiAmount, userId]);
+                        const u = await client.query('UPDATE users SET balance = balance + $1 WHERE id = $2 RETURNING name, matricula', [aiAmount, userId]);
+
+                        telegram.notifyRecharge({
+                            pool,
+                            userName: u.rows[0]?.name,
+                            matricula: u.rows[0]?.matricula,
+                            amount: aiAmount,
+                            method: 'Comprovante PIX (Aprovado por IA)'
+                        }).catch(() => {});
                     });
                     autoCredited = true;
                     creditedAmount = aiAmount;
@@ -872,11 +1152,19 @@ app.put('/api/admin/receipts/:id/approve', requireAdmin, async (req, res) => {
             'INSERT INTO transactions (user_id, amount, type) VALUES ($1, $2, $3)',
             [user_id, amount, 'recharge']
         );
-        await client.query(
-            'UPDATE users SET balance = balance + $1 WHERE id = $2',
+        const u = await client.query(
+            'UPDATE users SET balance = balance + $1 WHERE id = $2 RETURNING name, matricula',
             [amount, user_id]
         );
         await client.query('COMMIT');
+
+        telegram.notifyRecharge({
+            pool,
+            userName: u.rows[0]?.name,
+            matricula: u.rows[0]?.matricula,
+            amount,
+            method: 'Comprovante PIX (Aprovado pelo Admin)'
+        }).catch(() => {});
         res.json({ success: true });
     } catch (err) {
         await client.query('ROLLBACK');

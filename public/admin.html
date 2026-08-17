@@ -846,9 +846,58 @@
         <!-- ===== TAB: CONFIGURAÇÕES ===== -->
         <div class="tab-panel" id="tab-config">
             <div class="admin-dashboard">
+                <!-- Mercado Pago PIX Dinâmico -->
                 <div class="glass-panel admin-card">
-                    <h3>Pagamento PIX</h3>
-                    <p style="margin-bottom: 10px; color: var(--text-muted); font-size: 0.9rem;">Configure os dados para recebimento das recargas.</p>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <h3 style="margin:0;">⚡ PIX Dinâmico (Mercado Pago)</h3>
+                        <span id="mp-status-badge" style="font-size:0.75rem; padding:2px 8px; border-radius:6px; background:rgba(255,255,255,0.1); color:var(--text-muted);">Verificando...</span>
+                    </div>
+                    <p style="margin-bottom: 12px; color: var(--text-muted); font-size: 0.85rem;">
+                        Permite geração de QR Code PIX com baixa automática instantânea via Webhook.
+                    </p>
+                    <div class="input-group small">
+                        <input type="password" id="mp-access-token-input" placeholder=" ">
+                        <label for="mp-access-token-input">Access Token (APP_USR-...)</label>
+                    </div>
+                    <button class="btn btn-primary" id="btn-save-mp-token" style="width: 100%; margin-bottom: 10px;">Salvar Mercado Pago</button>
+                    <p id="mp-token-msg" class="action-msg"></p>
+                    <div style="background:rgba(255,255,255,0.04); padding:8px 10px; border-radius:6px; font-size:0.78rem; color:var(--text-muted); margin-top:8px;">
+                        <strong>URL do Webhook no Mercado Pago:</strong><br>
+                        <code style="color:#60a5fa; word-break:break-all;">https://mt-coffee-production.up.railway.app/api/webhooks/mercadopago</code>
+                    </div>
+                </div>
+
+                <!-- Notificações no Telegram -->
+                <div class="glass-panel admin-card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <h3 style="margin:0;">🤖 Alertas no Telegram</h3>
+                        <span id="tg-status-badge" style="font-size:0.75rem; padding:2px 8px; border-radius:6px; background:rgba(255,255,255,0.1); color:var(--text-muted);">Verificando...</span>
+                    </div>
+                    <p style="margin-bottom: 12px; color: var(--text-muted); font-size: 0.85rem;">
+                        Receba avisos de estoque baixo e confirmação de recargas diretamente no grupo ou canal do Telegram.
+                    </p>
+                    <div class="input-group small">
+                        <input type="password" id="tg-bot-token-input" placeholder=" ">
+                        <label for="tg-bot-token-input">Bot Token (ex: 123456:ABC-DEF...)</label>
+                    </div>
+                    <div class="input-group small">
+                        <input type="text" id="tg-chat-id-input" placeholder=" ">
+                        <label for="tg-chat-id-input">Chat ID ou Grupo (ex: -100123456789 ou @canal)</label>
+                    </div>
+                    <div class="input-group small">
+                        <input type="number" id="tg-low-stock-input" placeholder=" " value="200" min="10" step="10">
+                        <label for="tg-low-stock-input">Alerta de estoque baixo quando restar (gramas):</label>
+                    </div>
+                    <div style="display:flex; gap:8px;">
+                        <button class="btn btn-primary" id="btn-save-telegram" style="flex:1;">Salvar Telegram</button>
+                        <button class="btn btn-outline" id="btn-test-telegram" style="flex:1; border-color:#60a5fa; color:#60a5fa;">Testar Envio</button>
+                    </div>
+                    <p id="tg-msg" class="action-msg"></p>
+                </div>
+
+                <div class="glass-panel admin-card">
+                    <h3>Chave PIX Tradicional (Manual)</h3>
+                    <p style="margin-bottom: 10px; color: var(--text-muted); font-size: 0.9rem;">Exibida na aba de envio manual de comprovantes.</p>
                     <div class="input-group small">
                         <input type="text" id="pix-key-input" placeholder=" ">
                         <label for="pix-key-input">Chave PIX (E-mail, CPF, Celular...)</label>

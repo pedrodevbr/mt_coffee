@@ -50,6 +50,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const userReceiptsList = document.getElementById('user-receipts-list');
     const btnConfirmRecharge = document.getElementById('btn-confirm-recharge');
 
+    // Dynamic PIX Elements
+    const tabBtnPixAuto = document.getElementById('tab-btn-pix-auto');
+    const tabBtnPixManual = document.getElementById('tab-btn-pix-manual');
+    const rechargePanelAuto = document.getElementById('recharge-panel-auto');
+    const rechargePanelManual = document.getElementById('recharge-panel-manual');
+    const pixAmountStep = document.getElementById('pix-amount-step');
+    const pixDisplayStep = document.getElementById('pix-display-step');
+    const pixCustomAmount = document.getElementById('pix-custom-amount');
+    const btnGeneratePix = document.getElementById('btn-generate-pix');
+    const pixErrorMsg = document.getElementById('pix-error-msg');
+    const pixDynamicQr = document.getElementById('pix-dynamic-qr');
+    const pixDisplayAmount = document.getElementById('pix-display-amount');
+    const pixCopyPasteInput = document.getElementById('pix-copy-paste-input');
+    const btnCopyPix = document.getElementById('btn-copy-pix');
+    const btnCancelPix = document.getElementById('btn-cancel-pix');
+    let pixPollTimer = null;
+
     // Init
     fetchSystemState();
 
@@ -79,14 +96,91 @@ document.addEventListener('DOMContentLoaded', () => {
     btnLogout.addEventListener('click', handleLogout);
     btnConsume.addEventListener('click', handleConsume);
 
+    // Tab Switching in Recharge Modal
+    if (tabBtnPixAuto && tabBtnPixManual) {
+        tabBtnPixAuto.addEventListener('click', () => {
+            tabBtnPixAuto.style.background = 'var(--accent)';
+            tabBtnPixAuto.style.color = '#fff';
+            tabBtnPixAuto.style.fontWeight = '600';
+            tabBtnPixManual.style.background = 'rgba(255,255,255,0.06)';
+            tabBtnPixManual.style.color = 'var(--text-muted)';
+            tabBtnPixManual.style.fontWeight = 'normal';
+            rechargePanelAuto.style.display = 'block';
+            rechargePanelManual.style.display = 'none';
+        });
+
+        tabBtnPixManual.addEventListener('click', () => {
+            stopPixPolling();
+            tabBtnPixManual.style.background = 'var(--accent)';
+            tabBtnPixManual.style.color = '#fff';
+            tabBtnPixManual.style.fontWeight = '600';
+            tabBtnPixAuto.style.background = 'rgba(255,255,255,0.06)';
+            tabBtnPixAuto.style.color = 'var(--text-muted)';
+            tabBtnPixAuto.style.fontWeight = 'normal';
+            rechargePanelManual.style.display = 'block';
+            rechargePanelAuto.style.display = 'none';
+        });
+    }
+
+    // Quick amount buttons
+    document.querySelectorAll('.btn-quick-amt').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.btn-quick-amt').forEach(b => {
+                b.style.background = 'rgba(255,255,255,0.08)';
+                b.style.border = '1px solid rgba(255,255,255,0.15)';
+                b.style.color = 'var(--text-primary)';
+                b.style.fontWeight = 'normal';
+            });
+            btn.style.background = 'var(--accent)';
+            btn.style.border = '1px solid var(--accent)';
+            btn.style.color = '#fff';
+            btn.style.fontWeight = '600';
+            if (pixCustomAmount) {
+                pixCustomAmount.value = parseFloat(btn.dataset.amount).toFixed(2);
+            }
+        });
+    });
+
+    if (btnGeneratePix) {
+        btnGeneratePix.addEventListener('click', handleGenerateDynamicPix);
+    }
+
+    if (btnCancelPix) {
+        btnCancelPix.addEventListener('click', () => {
+            stopPixPolling();
+            pixDisplayStep.style.display = 'none';
+            pixAmountStep.style.display = 'block';
+        });
+    }
+
+    if (btnCopyPix) {
+        btnCopyPix.addEventListener('click', () => {
+            if (pixCopyPasteInput && pixCopyPasteInput.value) {
+                navigator.clipboard.writeText(pixCopyPasteInput.value).then(() => {
+                    const original = btnCopyPix.textContent;
+                    btnCopyPix.textContent = '✓ Copiado!';
+                    btnCopyPix.style.background = '#10b981';
+                    setTimeout(() => {
+                        btnCopyPix.textContent = original;
+                        btnCopyPix.style.background = 'var(--accent)';
+                    }, 2000);
+                });
+            }
+        });
+    }
+
     btnShowRecharge.addEventListener('click', () => {
         receiptFile.value = '';
         receiptUploadMsg.textContent = '';
+        if (pixErrorMsg) pixErrorMsg.style.display = 'none';
+        if (pixDisplayStep) pixDisplayStep.style.display = 'none';
+        if (pixAmountStep) pixAmountStep.style.display = 'block';
         rechargeModal.classList.remove('hidden');
         if (currentUser) loadUserReceipts();
     });
 
     closeModalBtn.addEventListener('click', () => {
+        stopPixPolling();
         rechargeModal.classList.add('hidden');
     });
 
@@ -764,6 +858,105 @@ document.addEventListener('DOMContentLoaded', () => {
             await loadCoffeesForUser();
         } catch (err) {
             alert('Erro: ' + err.message);
+        }
+    }
+
+    async function handleGenerateDynamicPix() {
+        if (!currentUser) return;
+        const amount = parseFloat(pixCustomAmount.value);
+        if (isNaN(amount) || amount < 0.50) {
+            pixErrorMsg.textContent = 'Informe um valor válido a partir de R$ 0,50.';
+            pixErrorMsg.style.display = 'block';
+            return;
+        }
+        pixErrorMsg.style.display = 'none';
+        btnGeneratePix.disabled = true;
+        btnGeneratePix.textContent = 'Gerando PIX...';
+
+        try {
+            const res = await fetch(`${API_URL}/pix/create`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    matricula: currentUser.matricula,
+                    amount
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'Erro ao gerar cobrança PIX');
+
+            // Preenche dados do PIX
+            pixDisplayAmount.textContent = `R$ ${parseFloat(data.amount).toFixed(2).replace('.', ',')}`;
+            pixDynamicQr.src = data.qr_code_base64;
+            pixCopyPasteInput.value = data.qr_code;
+
+            pixAmountStep.style.display = 'none';
+            pixDisplayStep.style.display = 'block';
+
+            // Inicia o polling para detecção em tempo real
+            startPixPolling(data.payment_id);
+        } catch (err) {
+            pixErrorMsg.textContent = err.message;
+            pixErrorMsg.style.display = 'block';
+        } finally {
+            btnGeneratePix.disabled = false;
+            btnGeneratePix.textContent = 'Gerar QR Code PIX';
+        }
+    }
+
+    function startPixPolling(paymentId) {
+        stopPixPolling();
+        pixPollTimer = setInterval(async () => {
+            if (!currentUser || rechargeModal.classList.contains('hidden')) {
+                stopPixPolling();
+                return;
+            }
+            try {
+                const res = await fetch(`${API_URL}/pix/status/${paymentId}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data.paid && data.status === 'approved') {
+                    stopPixPolling();
+                    // Atualiza saldo do usuário
+                    if (data.new_balance !== undefined) {
+                        currentUser.balance = parseFloat(data.new_balance);
+                    } else {
+                        currentUser.balance = (parseFloat(currentUser.balance) || 0) + (parseFloat(data.amount) || 0);
+                    }
+                    updateBalanceUI();
+
+                    pixDisplayStep.innerHTML = `
+                        <div style="padding: 20px 10px; text-align: center;">
+                            <div style="font-size: 3rem; margin-bottom: 10px;">🎉</div>
+                            <h3 style="color: #10b981; margin-bottom: 8px;">PIX Confirmado com Sucesso!</h3>
+                            <p style="color: var(--text-muted); font-size: 0.9rem; margin-bottom: 16px;">
+                                O valor de <strong style="color: #fff;">R$ ${parseFloat(data.amount).toFixed(2).replace('.', ',')}</strong> já foi creditado no seu saldo.
+                            </p>
+                            <button id="btn-pix-done" class="btn btn-primary" style="padding: 10px 24px; background: #10b981; border: none; border-radius: 8px; font-weight: 600;">
+                                Pronto!
+                            </button>
+                        </div>
+                    `;
+                    const doneBtn = document.getElementById('btn-pix-done');
+                    if (doneBtn) {
+                        doneBtn.addEventListener('click', () => {
+                            rechargeModal.classList.add('hidden');
+                        });
+                    }
+                    setTimeout(() => {
+                        rechargeModal.classList.add('hidden');
+                    }, 4000);
+                }
+            } catch {
+                // Erro de rede pontual no polling ignorado
+            }
+        }, 2500);
+    }
+
+    function stopPixPolling() {
+        if (pixPollTimer) {
+            clearInterval(pixPollTimer);
+            pixPollTimer = null;
         }
     }
 

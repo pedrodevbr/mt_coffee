@@ -25,9 +25,11 @@ if (!/^postgres(ql)?:\/\//.test(DATABASE_URL)) {
     process.exit(1);
 }
 
-const isLocalDb = /@(localhost|127\.0\.0\.1|\[::1\])/.test(DATABASE_URL);
+const isInternalDb = /@(localhost|127\.0\.0\.1|\[::1\]|.*\.railway\.internal)/i.test(DATABASE_URL);
 
-let useSsl = !isLocalDb;
+let useSsl = !isInternalDb;
+if (DATABASE_URL.includes('sslmode=disable')) useSsl = false;
+if (DATABASE_URL.includes('sslmode=require')) useSsl = true;
 if (process.env.PGSSLMODE === 'disable') useSsl = false;
 if (process.env.PGSSLMODE === 'require') useSsl = true;
 
@@ -199,7 +201,26 @@ async function initSchema() {
         }
 
         await client.query(`
+            CREATE TABLE IF NOT EXISTS extra_costs (
+                id SERIAL PRIMARY KEY,
+                description TEXT NOT NULL,
+                amount REAL NOT NULL,
+                remaining REAL,
+                dilution_doses INTEGER DEFAULT 200,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        `);
+
+        await client.query(`
             ALTER TABLE extra_costs ADD COLUMN IF NOT EXISTS dilution_doses INTEGER DEFAULT 200
+        `);
+
+        await client.query(`
+            ALTER TABLE extra_costs ADD COLUMN IF NOT EXISTS remaining REAL
+        `);
+
+        await client.query(`
+            UPDATE extra_costs SET remaining = amount WHERE remaining IS NULL
         `);
 
         await client.query(`
@@ -212,22 +233,6 @@ async function initSchema() {
                 reason       TEXT,
                 timestamp    TIMESTAMPTZ DEFAULT NOW()
             )
-        `);
-
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS extra_costs (
-                id SERIAL PRIMARY KEY,
-                description TEXT NOT NULL,
-                amount REAL NOT NULL,
-                created_at TIMESTAMPTZ DEFAULT NOW()
-            )
-        `);
-
-        await client.query(`
-            ALTER TABLE extra_costs ADD COLUMN IF NOT EXISTS remaining REAL
-        `);
-        await client.query(`
-            UPDATE extra_costs SET remaining = amount WHERE remaining IS NULL
         `);
 
         await client.query(`
@@ -285,7 +290,23 @@ async function initSchema() {
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 updated_at TIMESTAMPTZ DEFAULT NOW(),
                 UNIQUE (coffee_id, user_id)
-            )
+            );
+
+            CREATE TABLE IF NOT EXISTS pix_charges (
+                id SERIAL PRIMARY KEY,
+                payment_id TEXT UNIQUE NOT NULL,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                matricula TEXT NOT NULL,
+                amount REAL NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending',
+                qr_code TEXT,
+                qr_code_base64 TEXT,
+                ticket_url TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                paid_at TIMESTAMPTZ
+            );
+            CREATE INDEX IF NOT EXISTS idx_pix_charges_payment_id ON pix_charges(payment_id);
+            CREATE INDEX IF NOT EXISTS idx_pix_charges_user_id ON pix_charges(user_id);
         `);
 
         const stateCount = await client.query('SELECT COUNT(*) as count FROM system_state');
@@ -308,14 +329,83 @@ async function initSchema() {
             await client.query("INSERT INTO settings (key, value) VALUES ('admin_pin', '1234')");
         }
 
+        const lowStockCount = await client.query("SELECT COUNT(*) as count FROM settings WHERE key = 'low_stock_threshold_grams'");
+        if (parseInt(lowStockCount.rows[0].count) === 0) {
+            await client.query("INSERT INTO settings (key, value) VALUES ('low_stock_threshold_grams', '200')");
+        }
+
         const adminCheck = await client.query("SELECT * FROM users WHERE matricula = '0000'");
         if (adminCheck.rows.length === 0) {
             await client.query("INSERT INTO users (name, matricula, balance) VALUES ('Admin', '0000', 0)");
         }
 
+        // Auto-migração transparente a partir de SOURCE_DATABASE_URL se o banco de dados de destino estiver vazio
+        const sourceUrl = process.env.SOURCE_DATABASE_URL;
+        if (sourceUrl && sourceUrl !== DATABASE_URL) {
+            const userCountRes = await client.query("SELECT COUNT(*) as count FROM users WHERE matricula != '0000'");
+            const isFreshDb = parseInt(userCountRes.rows[0].count) === 0;
+            if (isFreshDb) {
+                console.log('[migration] Detectado banco de dados limpo. Iniciando cópia automática a partir de SOURCE_DATABASE_URL...');
+                try {
+                    const { Client } = require('pg');
+                    const srcClient = new Client({
+                        connectionString: sourceUrl,
+                        ssl: { rejectUnauthorized: false }
+                    });
+                    await srcClient.connect();
+
+                    const tables = [
+                        { name: 'users', hasId: true },
+                        { name: 'coffees', hasId: true },
+                        { name: 'system_state', hasId: true },
+                        { name: 'settings', hasId: false },
+                        { name: 'stock_history', hasId: true },
+                        { name: 'price_history', hasId: true },
+                        { name: 'extra_costs', hasId: true },
+                        { name: 'stock_adjustments', hasId: true },
+                        { name: 'transactions', hasId: true },
+                        { name: 'payment_receipts', hasId: true },
+                        { name: 'coffee_ratings', hasId: true }
+                    ];
+
+                    for (let i = tables.length - 1; i >= 0; i--) {
+                        await client.query(`TRUNCATE TABLE ${tables[i].name} CASCADE`);
+                    }
+
+                    for (const t of tables) {
+                        const srcRows = await srcClient.query(`SELECT * FROM ${t.name} ${t.hasId ? 'ORDER BY id ASC' : ''}`);
+                        if (srcRows.rows.length > 0) {
+                            const cols = Object.keys(srcRows.rows[0]);
+                            const colNames = cols.map(c => `"${c}"`).join(', ');
+                            for (const row of srcRows.rows) {
+                                const placeholders = cols.map((_, idx) => `$${idx + 1}`).join(', ');
+                                const values = cols.map(c => row[c]);
+                                await client.query(`INSERT INTO ${t.name} (${colNames}) VALUES (${placeholders})`, values);
+                            }
+                        }
+                        if (t.hasId) {
+                            await client.query(`
+                                SELECT setval(
+                                    pg_get_serial_sequence('${t.name}', 'id'),
+                                    COALESCE((SELECT MAX(id) FROM ${t.name}), 1),
+                                    (SELECT MAX(id) IS NOT NULL FROM ${t.name})
+                                )
+                            `);
+                        }
+                        console.log(`[migration] Copiada tabela ${t.name}: ${srcRows.rows.length} registros.`);
+                    }
+
+                    await srcClient.end();
+                    console.log('[migration] ✅ Migração automática concluída com sucesso!');
+                } catch (migErr) {
+                    console.error('[migration] ❌ Erro durante auto-migração:', migErr.message);
+                }
+            }
+        }
+
         console.log('Database schema initialized successfully.');
     } catch (err) {
-        client.release();
+        console.error('initSchema error:', err);
         throw new Error('Failed to initialize database schema: ' + err.message);
     } finally {
         client.release();

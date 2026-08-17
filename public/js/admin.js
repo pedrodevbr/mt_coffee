@@ -235,6 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadExtraCosts();
         loadAdjustments();
         loadAnalysis();
+        loadIntegrationsConfig();
     }
 
     // Check token on load
@@ -252,6 +253,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const btnSaveDoseGrams = document.getElementById('btn-save-dose-grams');
     if (btnSaveDoseGrams) btnSaveDoseGrams.addEventListener('click', handleSaveDoseGrams);
+
+    const btnSaveMpToken = document.getElementById('btn-save-mp-token');
+    if (btnSaveMpToken) btnSaveMpToken.addEventListener('click', handleSaveMpToken);
+
+    const btnSaveTelegram = document.getElementById('btn-save-telegram');
+    if (btnSaveTelegram) btnSaveTelegram.addEventListener('click', handleSaveTelegram);
+
+    const btnTestTelegram = document.getElementById('btn-test-telegram');
+    if (btnTestTelegram) btnTestTelegram.addEventListener('click', handleTestTelegram);
 
     btnNewUser.addEventListener('click', () => {
         userModalTitle.textContent = 'Novo Usuário';
@@ -1259,8 +1269,156 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // =====================
-    //  USERS
+    //  INTEGRAÇÕES (MERCADO PAGO & TELEGRAM)
     // =====================
+    async function loadIntegrationsConfig() {
+        try {
+            const res = await authFetch(`${API_URL}/admin/integrations`);
+            if (!res.ok) return;
+            const data = await res.json();
+
+            // Status badges
+            const mpBadge = document.getElementById('mp-status-badge');
+            const tgBadge = document.getElementById('tg-status-badge');
+            const mpInput = document.getElementById('mp-access-token-input');
+            const tgBotInput = document.getElementById('tg-bot-token-input');
+            const tgChatInput = document.getElementById('tg-chat-id-input');
+            const tgLowStockInput = document.getElementById('tg-low-stock-input');
+
+            if (mpBadge) {
+                if (data.mp_configured) {
+                    mpBadge.textContent = '🟢 Ativo';
+                    mpBadge.style.background = 'rgba(16, 185, 129, 0.2)';
+                    mpBadge.style.color = '#10b981';
+                } else {
+                    mpBadge.textContent = '⚪ Desativado';
+                    mpBadge.style.background = 'rgba(255, 255, 255, 0.1)';
+                    mpBadge.style.color = 'var(--text-muted)';
+                }
+            }
+
+            if (tgBadge) {
+                if (data.telegram_configured) {
+                    tgBadge.textContent = '🟢 Ativo';
+                    tgBadge.style.background = 'rgba(16, 185, 129, 0.2)';
+                    tgBadge.style.color = '#10b981';
+                } else {
+                    tgBadge.textContent = '⚪ Desativado';
+                    tgBadge.style.background = 'rgba(255, 255, 255, 0.1)';
+                    tgBadge.style.color = 'var(--text-muted)';
+                }
+            }
+
+            if (mpInput && data.mp_masked && !mpInput.value) {
+                mpInput.placeholder = `Token atual: ${data.mp_masked}`;
+            }
+            if (tgBotInput && data.telegram_bot_masked && !tgBotInput.value) {
+                tgBotInput.placeholder = `Token atual: ${data.telegram_bot_masked}`;
+            }
+            if (tgChatInput && data.telegram_chat_id && !tgChatInput.value) {
+                tgChatInput.value = data.telegram_chat_id;
+            }
+            if (tgLowStockInput && data.low_stock_threshold_grams) {
+                tgLowStockInput.value = data.low_stock_threshold_grams;
+            }
+        } catch {
+            // Ignora falhas de conexão
+        }
+    }
+
+    async function handleSaveMpToken() {
+        const input = document.getElementById('mp-access-token-input');
+        const msg = document.getElementById('mp-token-msg');
+        const btn = document.getElementById('btn-save-mp-token');
+        const token = input.value.trim();
+
+        btn.disabled = true;
+        btn.textContent = 'Salvando...';
+        try {
+            const res = await authFetch(`${API_URL}/admin/integrations`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ mp_access_token: token })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showMessage(msg, 'Configurações do Mercado Pago salvas com sucesso!');
+                input.value = '';
+                await loadIntegrationsConfig();
+            } else {
+                showMessage(msg, data.error || 'Erro ao salvar.', true);
+            }
+        } catch {
+            showMessage(msg, 'Erro de conexão.', true);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Salvar Mercado Pago';
+        }
+    }
+
+    async function handleSaveTelegram() {
+        const botInput = document.getElementById('tg-bot-token-input');
+        const chatInput = document.getElementById('tg-chat-id-input');
+        const stockInput = document.getElementById('tg-low-stock-input');
+        const msg = document.getElementById('tg-msg');
+        const btn = document.getElementById('btn-save-telegram');
+
+        const body = {
+            telegram_chat_id: chatInput.value.trim(),
+            low_stock_threshold_grams: parseFloat(stockInput.value) || 200
+        };
+        if (botInput.value.trim()) {
+            body.telegram_bot_token = botInput.value.trim();
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Salvando...';
+        try {
+            const res = await authFetch(`${API_URL}/admin/integrations`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify(body)
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showMessage(msg, 'Configurações do Telegram salvas!');
+                botInput.value = '';
+                await loadIntegrationsConfig();
+            } else {
+                showMessage(msg, data.error || 'Erro ao salvar.', true);
+            }
+        } catch {
+            showMessage(msg, 'Erro de conexão.', true);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Salvar Telegram';
+        }
+    }
+
+    async function handleTestTelegram() {
+        const msg = document.getElementById('tg-msg');
+        const btn = document.getElementById('btn-test-telegram');
+
+        btn.disabled = true;
+        btn.textContent = 'Enviando...';
+        try {
+            const res = await authFetch(`${API_URL}/admin/telegram/test`, {
+                method: 'POST',
+                headers: authHeaders()
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showMessage(msg, '✓ Mensagem de teste enviada para o Telegram!');
+            } else {
+                showMessage(msg, data.error || 'Falha ao enviar mensagem de teste.', true);
+            }
+        } catch {
+            showMessage(msg, 'Erro de conexão ao testar Telegram.', true);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Testar Envio';
+        }
+    }
     async function loadUsers() {
         try {
             const res = await authFetch(`${API_URL}/users`);
