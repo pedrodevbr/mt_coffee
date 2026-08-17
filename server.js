@@ -485,7 +485,7 @@ app.get('/api/users', requireAdmin, async (req, res) => {
 app.get('/api/admin/integrations', requireAdmin, async (req, res) => {
     try {
         const resSettings = await pool.query(
-            "SELECT key, value FROM settings WHERE key IN ('mp_access_token', 'telegram_bot_token', 'telegram_chat_id', 'low_stock_threshold_grams')"
+            "SELECT key, value FROM settings WHERE key IN ('mp_access_token', 'telegram_bot_token', 'telegram_chat_id', 'low_stock_threshold_grams', 'mp_fee_percent', 'railway_monthly_cost')"
         );
         const map = {};
         resSettings.rows.forEach(r => { map[r.key] = r.value; });
@@ -494,6 +494,8 @@ app.get('/api/admin/integrations', requireAdmin, async (req, res) => {
         const tgToken = map['telegram_bot_token'] || process.env.TELEGRAM_BOT_TOKEN || '';
         const tgChat = map['telegram_chat_id'] || process.env.TELEGRAM_CHAT_ID || '';
         const lowStock = map['low_stock_threshold_grams'] || '200';
+        const mpFee = map['mp_fee_percent'] || '0.99';
+        const railwayCost = map['railway_monthly_cost'] || '28.00';
 
         res.json({
             mp_configured: Boolean(mpToken),
@@ -501,7 +503,9 @@ app.get('/api/admin/integrations', requireAdmin, async (req, res) => {
             telegram_configured: Boolean(tgToken && tgChat),
             telegram_bot_masked: tgToken ? (tgToken.slice(0, 8) + '...' + tgToken.slice(-4)) : '',
             telegram_chat_id: tgChat,
-            low_stock_threshold_grams: parseFloat(lowStock) || 200
+            low_stock_threshold_grams: parseFloat(lowStock) || 200,
+            mp_fee_percent: parseFloat(mpFee) || 0.99,
+            railway_monthly_cost: parseFloat(railwayCost) || 28.00
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -510,7 +514,7 @@ app.get('/api/admin/integrations', requireAdmin, async (req, res) => {
 
 app.post('/api/admin/integrations', requireAdmin, async (req, res) => {
     try {
-        const { mp_access_token, telegram_bot_token, telegram_chat_id, low_stock_threshold_grams } = req.body;
+        const { mp_access_token, telegram_bot_token, telegram_chat_id, low_stock_threshold_grams, mp_fee_percent, railway_monthly_cost } = req.body;
 
         if (mp_access_token !== undefined) {
             await pool.query(
@@ -543,8 +547,61 @@ app.post('/api/admin/integrations', requireAdmin, async (req, res) => {
                 );
             }
         }
+        if (mp_fee_percent !== undefined) {
+            const fee = parseFloat(mp_fee_percent);
+            if (!isNaN(fee) && fee >= 0 && fee < 100) {
+                await pool.query(
+                    `INSERT INTO settings (key, value) VALUES ('mp_fee_percent', $1)
+                     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+                    [String(fee)]
+                );
+                await recalculate(pool);
+            }
+        }
+        if (railway_monthly_cost !== undefined) {
+            const cost = parseFloat(railway_monthly_cost);
+            if (!isNaN(cost) && cost >= 0) {
+                await pool.query(
+                    `INSERT INTO settings (key, value) VALUES ('railway_monthly_cost', $1)
+                     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+                    [String(cost)]
+                );
+            }
+        }
 
-        res.json({ success: true, message: 'Configurações de integração atualizadas com sucesso!' });
+        res.json({ success: true, message: 'Configurações atualizadas com sucesso!' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/admin/costs/railway-monthly', requireAdmin, async (req, res) => {
+    try {
+        const { amount, dilution_doses } = req.body;
+        const settingRes = await pool.query("SELECT value FROM settings WHERE key IN ('railway_monthly_cost', 'extra_dilution_doses')");
+        const settings = {};
+        settingRes.rows.forEach(r => { settings[r.key] = r.value; });
+
+        const numAmount = parseFloat(amount) || parseFloat(settings.railway_monthly_cost) || 28.00;
+        const numDilution = parseInt(dilution_doses) || parseInt(settings.extra_dilution_doses) || 200;
+
+        const dateStr = new Date().toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+        const desc = `Servidor Railway (${dateStr.charAt(0).toUpperCase() + dateStr.slice(1)})`;
+
+        const result = await withTransaction(async (client) => {
+            const ins = await client.query(
+                'INSERT INTO extra_costs (description, amount, remaining, dilution_doses) VALUES ($1, $2, $2, $3) RETURNING *',
+                [desc, numAmount, numDilution]
+            );
+            await recalculate(client);
+            return ins.rows[0];
+        });
+
+        res.json({
+            success: true,
+            message: `Mensalidade do Railway de R$ ${numAmount.toFixed(2).replace('.', ',')} adicionada com sucesso (diluída em ${numDilution} doses)!`,
+            cost: result
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }

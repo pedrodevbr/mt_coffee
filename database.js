@@ -329,6 +329,16 @@ async function initSchema() {
             await client.query("INSERT INTO settings (key, value) VALUES ('admin_pin', '1234')");
         }
 
+        const mpFeeCount = await client.query("SELECT COUNT(*) as count FROM settings WHERE key = 'mp_fee_percent'");
+        if (parseInt(mpFeeCount.rows[0].count) === 0) {
+            await client.query("INSERT INTO settings (key, value) VALUES ('mp_fee_percent', '0.99')");
+        }
+
+        const railwayCostCount = await client.query("SELECT COUNT(*) as count FROM settings WHERE key = 'railway_monthly_cost'");
+        if (parseInt(railwayCostCount.rows[0].count) === 0) {
+            await client.query("INSERT INTO settings (key, value) VALUES ('railway_monthly_cost', '28.00')");
+        }
+
         const lowStockCount = await client.query("SELECT COUNT(*) as count FROM settings WHERE key = 'low_stock_threshold_grams'");
         if (parseInt(lowStockCount.rows[0].count) === 0) {
             await client.query("INSERT INTO settings (key, value) VALUES ('low_stock_threshold_grams', '200')");

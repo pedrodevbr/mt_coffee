@@ -859,12 +859,41 @@
                         <input type="password" id="mp-access-token-input" placeholder=" ">
                         <label for="mp-access-token-input">Access Token (APP_USR-...)</label>
                     </div>
+                    <div class="input-group small">
+                        <input type="number" id="mp-fee-input" placeholder=" " step="0.01" min="0" max="20" value="0.99">
+                        <label for="mp-fee-input">Taxa do Mercado Pago (%) — Embutida no preço da dose</label>
+                    </div>
                     <button class="btn btn-primary" id="btn-save-mp-token" style="width: 100%; margin-bottom: 10px;">Salvar Mercado Pago</button>
                     <p id="mp-token-msg" class="action-msg"></p>
                     <div style="background:rgba(255,255,255,0.04); padding:8px 10px; border-radius:6px; font-size:0.78rem; color:var(--text-muted); margin-top:8px;">
                         <strong>URL do Webhook no Mercado Pago:</strong><br>
                         <code style="color:#60a5fa; word-break:break-all;">https://mt-coffee-production.up.railway.app/api/webhooks/mercadopago</code>
                     </div>
+                </div>
+
+                <!-- Servidor Railway (Infraestrutura) -->
+                <div class="glass-panel admin-card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                        <h3 style="margin:0;">🖥️ Servidor Railway (Mensalidade)</h3>
+                        <span style="font-size:0.75rem; padding:2px 8px; border-radius:6px; background:rgba(96,165,250,0.15); color:#60a5fa;">Infraestrutura</span>
+                    </div>
+                    <p style="margin-bottom: 12px; color: var(--text-muted); font-size: 0.85rem;">
+                        Dilua o custo mensal do servidor nas doses de café consumidas para manter o caixa sustentável.
+                    </p>
+                    <div style="display:flex; gap:8px;">
+                        <div class="input-group small" style="flex:1;">
+                            <input type="number" id="railway-monthly-amount" placeholder=" " step="0.50" min="1" value="28.00">
+                            <label for="railway-monthly-amount">Valor Mensal (R$)</label>
+                        </div>
+                        <div class="input-group small" style="flex:1;">
+                            <input type="number" id="railway-dilution-doses" placeholder=" " min="10" step="10" value="200">
+                            <label for="railway-dilution-doses">Diluir em (doses)</label>
+                        </div>
+                    </div>
+                    <button class="btn btn-primary" id="btn-launch-railway-cost" style="width: 100%; margin-bottom: 6px; background: #6366f1;">
+                        ⚡ Lançar Mensalidade no Estoque de Café
+                    </button>
+                    <p id="railway-cost-msg" class="action-msg"></p>
                 </div>
 
                 <!-- Notificações no Telegram -->

@@ -25,7 +25,7 @@ async function withTransaction(callback) {
 
 async function gatherSourceData(db) {
     const [settingResult, stockSum, consResult, adjResult, extraResult] = await Promise.all([
-        db.query("SELECT key, value FROM settings WHERE key IN ('dose_grams', 'extra_dilution_doses')"),
+        db.query("SELECT key, value FROM settings WHERE key IN ('dose_grams', 'extra_dilution_doses', 'mp_fee_percent')"),
         db.query('SELECT COALESCE(SUM(added_grams),0) AS tg, COALESCE(SUM(added_cost),0) AS tc FROM stock_history'),
         db.query("SELECT COUNT(*) AS cnt, COALESCE(SUM(grams_deducted),0) AS g, COALESCE(SUM(cost_deducted),0) AS c FROM transactions WHERE type='consumption'"),
         db.query('SELECT COALESCE(SUM(delta_grams),0) AS dg FROM stock_adjustments'),
@@ -40,6 +40,7 @@ async function gatherSourceData(db) {
 
     const doseGrams = parseFloat(settings.dose_grams) || 10;
     const dilutionDoses = parseInt(settings.extra_dilution_doses) || 200;
+    const mpFeePercent = parseFloat(settings.mp_fee_percent) || 0;
     const totalPurchasedGrams = parseFloat(stockSum.rows[0].tg);
     const totalPurchaseCost = parseFloat(stockSum.rows[0].tc);
     const totalConsumptions = parseInt(consResult.rows[0].cnt);
@@ -56,7 +57,7 @@ async function gatherSourceData(db) {
     const extraPerDoseTotal = parseFloat(extraResult.rows[0].per_dose_total);
 
     return {
-        doseGrams, dilutionDoses, totalPurchasedGrams, totalPurchaseCost,
+        doseGrams, dilutionDoses, mpFeePercent, totalPurchasedGrams, totalPurchaseCost,
         totalConsumptions, consumedGrams, consumedCost, adjGrams,
         extraTotal, extraRemaining, extraPerDoseTotal
     };
@@ -68,7 +69,7 @@ async function gatherSourceData(db) {
 
 function calculateState(data) {
     const {
-        doseGrams, dilutionDoses, totalPurchasedGrams, totalPurchaseCost,
+        doseGrams, dilutionDoses, mpFeePercent, totalPurchasedGrams, totalPurchaseCost,
         consumedGrams, consumedCost, adjGrams, extraTotal, extraRemaining, extraPerDoseTotal,
         totalConsumptions
     } = data;
@@ -94,14 +95,20 @@ function calculateState(data) {
     // Extra price: fixed per-dose from each active extra (amount / dilution_doses)
     // extraPerDoseTotal = SUM( MIN(remaining, amount / dilution_doses) ) for active entries
     const extraCostPerDose = extraPerDoseTotal;
+    const subtotalPerDose = basePricePerDose + extraCostPerDose;
+
+    // Embutir taxa do Mercado Pago / Gateway se configurada
+    const feePct = (typeof mpFeePercent === 'number' && mpFeePercent >= 0 && mpFeePercent < 100) ? mpFeePercent : 0;
+    const currentPricePerDose = feePct > 0 ? subtotalPerDose / (1 - (feePct / 100)) : subtotalPerDose;
+    const feePerDose = Math.max(0, currentPricePerDose - subtotalPerDose);
 
     const remainingDoses = doseGrams > 0 ? Math.floor(currentStock / doseGrams) : 0;
-    const currentPricePerDose = basePricePerDose + extraCostPerDose;
 
     return {
         currentStock, remainingPurchaseCost,
         remainingExtraCosts: extraRemaining,
         currentPricePerDose, basePricePerDose, extraCostPerDose,
+        subtotalPerDose, feePerDose, mpFeePercent: feePct,
         remainingDoses, doseGrams, dilutionDoses, consumedFraction,
         extraTotal, totalPurchasedGrams, totalPurchaseCost, totalConsumptions
     };

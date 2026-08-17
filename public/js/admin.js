@@ -263,6 +263,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnTestTelegram = document.getElementById('btn-test-telegram');
     if (btnTestTelegram) btnTestTelegram.addEventListener('click', handleTestTelegram);
 
+    const btnLaunchRailwayCost = document.getElementById('btn-launch-railway-cost');
+    if (btnLaunchRailwayCost) btnLaunchRailwayCost.addEventListener('click', handleLaunchRailwayCost);
+
     btnNewUser.addEventListener('click', () => {
         userModalTitle.textContent = 'Novo Usuário';
         editUserId.value = '';
@@ -1321,6 +1324,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tgLowStockInput && data.low_stock_threshold_grams) {
                 tgLowStockInput.value = data.low_stock_threshold_grams;
             }
+            const mpFeeInput = document.getElementById('mp-fee-input');
+            if (mpFeeInput && data.mp_fee_percent !== undefined) {
+                mpFeeInput.value = data.mp_fee_percent;
+            }
+            const railwayAmountInput = document.getElementById('railway-monthly-amount');
+            if (railwayAmountInput && data.railway_monthly_cost !== undefined) {
+                railwayAmountInput.value = data.railway_monthly_cost;
+            }
         } catch {
             // Ignora falhas de conexão
         }
@@ -1328,23 +1339,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function handleSaveMpToken() {
         const input = document.getElementById('mp-access-token-input');
+        const feeInput = document.getElementById('mp-fee-input');
         const msg = document.getElementById('mp-token-msg');
         const btn = document.getElementById('btn-save-mp-token');
         const token = input.value.trim();
+        const fee = parseFloat(feeInput.value) || 0;
 
         btn.disabled = true;
         btn.textContent = 'Salvando...';
         try {
+            const body = { mp_fee_percent: fee };
+            if (token) body.mp_access_token = token;
+
             const res = await authFetch(`${API_URL}/admin/integrations`, {
                 method: 'POST',
                 headers: authHeaders(),
-                body: JSON.stringify({ mp_access_token: token })
+                body: JSON.stringify(body)
             });
             const data = await res.json().catch(() => ({}));
             if (res.ok) {
                 showMessage(msg, 'Configurações do Mercado Pago salvas com sucesso!');
                 input.value = '';
                 await loadIntegrationsConfig();
+                await loadSystemState();
             } else {
                 showMessage(msg, data.error || 'Erro ao salvar.', true);
             }
@@ -1353,6 +1370,46 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             btn.disabled = false;
             btn.textContent = 'Salvar Mercado Pago';
+        }
+    }
+
+    async function handleLaunchRailwayCost() {
+        const amountInput = document.getElementById('railway-monthly-amount');
+        const dilutionInput = document.getElementById('railway-dilution-doses');
+        const msg = document.getElementById('railway-cost-msg');
+        const btn = document.getElementById('btn-launch-railway-cost');
+
+        const amount = parseFloat(amountInput.value);
+        const dilution = parseInt(dilutionInput.value) || 200;
+
+        if (isNaN(amount) || amount <= 0) {
+            showMessage(msg, 'Informe um valor válido para a mensalidade.', true);
+            return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Lançando...';
+        try {
+            const res = await authFetch(`${API_URL}/admin/costs/railway-monthly`, {
+                method: 'POST',
+                headers: authHeaders(),
+                body: JSON.stringify({ amount, dilution_doses: dilution })
+            });
+            const data = await res.json().catch(() => ({}));
+            if (res.ok) {
+                showMessage(msg, data.message || 'Mensalidade lançada com sucesso!');
+                await loadSystemState();
+                await loadExtraCosts();
+                await loadBalanceCard();
+                await loadEquityCard();
+            } else {
+                showMessage(msg, data.error || 'Erro ao lançar custo.', true);
+            }
+        } catch {
+            showMessage(msg, 'Erro de conexão.', true);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = '⚡ Lançar Mensalidade no Estoque de Café';
         }
     }
 
