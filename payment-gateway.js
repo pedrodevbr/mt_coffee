@@ -35,8 +35,14 @@ async function createPixPayment({ userId, matricula, name, email, amount, descri
     const payment = new Payment(client);
     const idempotencyKey = crypto.randomUUID();
 
-    const safeEmail = email && email.includes('@') ? email : `user_${matricula || userId}@mtcoffee.local`;
-    const safeName = name ? name.trim().split(' ')[0] : `Usuario ${matricula}`;
+    const safeEmail = (email && typeof email === 'string' && email.includes('@') && email.includes('.'))
+        ? email.trim()
+        : `usuario_${matricula || userId || 'cliente'}@mtcoffee.com.br`;
+
+    const cleanName = name ? name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim() : `Usuario ${matricula || ''}`;
+    const nameParts = cleanName.split(/\s+/).filter(Boolean);
+    const firstName = nameParts[0] || 'Cliente';
+    const lastName = nameParts.slice(1).join(' ') || 'MT Coffee';
 
     const body = {
         transaction_amount: Number(numAmount.toFixed(2)),
@@ -44,7 +50,8 @@ async function createPixPayment({ userId, matricula, name, email, amount, descri
         payment_method_id: 'pix',
         payer: {
             email: safeEmail,
-            first_name: safeName
+            first_name: firstName,
+            last_name: lastName
         },
         external_reference: JSON.stringify({
             userId,
