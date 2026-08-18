@@ -174,31 +174,14 @@ app.get('/api/system', async (req, res) => {
 });
 
 // =====================
-//  TRANSPARENCY & AUDIT (PUBLIC WITH PRIVACY MASKING)
+//  TRANSPARENCY & AUDIT (PUBLIC INDIVIDUAL MOVEMENTS & INVOICES)
 // =====================
 app.get('/api/transparency', async (req, res) => {
     try {
-        const callerMatricula = String(req.query.matricula || '').trim();
-
-        // 1. Obter estado atual e cálculo do motor de custos
-        const calc = await recalculate(pool);
-
-        // 2. Totais acumulados de caixa
-        const totalsRes = await pool.query(`
-            SELECT
-                (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE type = 'recharge') AS total_recharged,
-                (SELECT COALESCE(SUM(added_cost), 0) FROM stock_history) AS total_coffee_spent,
-                (SELECT COALESCE(SUM(amount), 0) FROM extra_costs) AS total_extra_spent
-        `);
-        const totalRecharged = parseFloat(totalsRes.rows[0].total_recharged);
-        const totalCoffeeSpent = parseFloat(totalsRes.rows[0].total_coffee_spent);
-        const totalExtraSpent = parseFloat(totalsRes.rows[0].total_extra_spent);
-        const totalSpent = totalCoffeeSpent + totalExtraSpent;
-        const cashBalance = totalRecharged - totalSpent;
-
-        // 3. Histórico de compras de café (remessas)
+        // 1. Histórico de compras de café (remessas com indicador de nota)
         const coffeePurchasesRes = await pool.query(`
             SELECT sh.id, sh.added_grams, sh.added_cost, sh.timestamp,
+                   sh.invoice_file_name, (sh.invoice_file_data IS NOT NULL) AS has_invoice,
                    c.name AS coffee_name, c.origin AS coffee_origin,
                    CASE WHEN sh.added_grams > 0 THEN ROUND((sh.added_cost / sh.added_grams * 1000)::numeric, 2) ELSE 0 END AS cost_per_kg
             FROM stock_history sh
@@ -207,66 +190,38 @@ app.get('/api/transparency', async (req, res) => {
             LIMIT 50
         `);
 
-        // 4. Custos extras e infraestrutura
+        // 2. Ajustes e inventário de estoque
+        const stockAdjustmentsRes = await pool.query(`
+            SELECT id, grams_before, grams_after, delta_grams, delta_cost, reason, timestamp
+            FROM stock_adjustments
+            ORDER BY timestamp DESC
+            LIMIT 50
+        `);
+
+        // 3. Custos extras e infraestrutura diluídos
         const extraCostsRes = await pool.query(`
-            SELECT id, description, amount, remaining, dilution_doses, created_at
+            SELECT id, description, amount, remaining, dilution_doses, created_at,
+                   invoice_file_name, (invoice_file_data IS NOT NULL) AS has_invoice
             FROM extra_costs
             ORDER BY created_at DESC
             LIMIT 50
         `);
 
-        // 5. Histórico de recargas com anonimização dos demais usuários
+        // 4. Histórico de recargas 100% anônimo (sem identificação de colaborador)
         const rechargesRes = await pool.query(`
-            SELECT t.id, t.amount, t.timestamp, u.name, u.matricula
+            SELECT t.id, t.amount, t.timestamp,
+                   CASE WHEN pc.id IS NOT NULL THEN 'PIX Dinâmico'
+                        WHEN pr.id IS NOT NULL THEN 'Comprovante'
+                        ELSE 'PIX / Recarga' END AS method
             FROM transactions t
-            JOIN users u ON t.user_id = u.id
+            LEFT JOIN pix_charges pc ON pc.user_id = t.user_id AND ABS(pc.amount - t.amount) < 0.01 AND ABS(EXTRACT(EPOCH FROM (t.timestamp - pc.paid_at))) < 15
+            LEFT JOIN payment_receipts pr ON pr.user_id = t.user_id AND ABS(pr.amount_approved - t.amount) < 0.01 AND ABS(EXTRACT(EPOCH FROM (t.timestamp - pr.created_at))) < 15
             WHERE t.type = 'recharge'
             ORDER BY t.timestamp DESC
             LIMIT 100
         `);
 
-        function maskName(name) {
-            if (!name) return 'Colaborador';
-            const parts = name.trim().split(/\s+/);
-            return parts.map(p => {
-                if (p.length <= 2) return p;
-                return p.charAt(0) + '*'.repeat(Math.max(2, p.length - 2)) + p.charAt(p.length - 1);
-            }).join(' ');
-        }
-
-        function maskMatricula(mat) {
-            if (!mat) return '***';
-            if (mat.length <= 2) return '**';
-            return '***' + mat.slice(-2);
-        }
-
-        const anonymizedRecharges = rechargesRes.rows.map(r => {
-            const isSelf = callerMatricula && r.matricula === callerMatricula;
-            return {
-                id: r.id,
-                amount: parseFloat(r.amount),
-                timestamp: r.timestamp,
-                user_display: isSelf ? `${r.name} (Você)` : maskName(r.name),
-                matricula_display: isSelf ? r.matricula : maskMatricula(r.matricula),
-                is_self: isSelf
-            };
-        });
-
         res.json({
-            summary: {
-                total_recharged: totalRecharged,
-                total_coffee_spent: totalCoffeeSpent,
-                total_extra_spent: totalExtraSpent,
-                total_spent: totalSpent,
-                cash_balance: cashBalance,
-                current_stock_grams: calc.currentStock,
-                remaining_doses: calc.remainingDoses,
-                current_price_per_dose: calc.currentPricePerDose,
-                base_price_per_dose: calc.basePricePerDose,
-                infra_cost_per_dose: calc.infraCostPerDose || 0,
-                monthly_estimated_doses: calc.monthlyDoses || 200,
-                total_consumptions: calc.totalConsumptions
-            },
             coffee_purchases: coffeePurchasesRes.rows.map(r => ({
                 id: r.id,
                 grams: parseFloat(r.added_grams),
@@ -274,6 +229,17 @@ app.get('/api/transparency', async (req, res) => {
                 cost_per_kg: parseFloat(r.cost_per_kg),
                 coffee_name: r.coffee_name || 'Café Especial',
                 origin: r.coffee_origin || '',
+                has_invoice: Boolean(r.has_invoice),
+                invoice_file_name: r.invoice_file_name || null,
+                timestamp: r.timestamp
+            })),
+            stock_adjustments: stockAdjustmentsRes.rows.map(r => ({
+                id: r.id,
+                grams_before: parseFloat(r.grams_before),
+                grams_after: parseFloat(r.grams_after),
+                delta_grams: parseFloat(r.delta_grams),
+                delta_cost: parseFloat(r.delta_cost),
+                reason: r.reason || 'Ajuste / Inventário',
                 timestamp: r.timestamp
             })),
             extra_costs: extraCostsRes.rows.map(r => ({
@@ -282,12 +248,53 @@ app.get('/api/transparency', async (req, res) => {
                 amount: parseFloat(r.amount),
                 remaining: parseFloat(r.remaining),
                 dilution_doses: parseInt(r.dilution_doses) || 200,
+                has_invoice: Boolean(r.has_invoice),
+                invoice_file_name: r.invoice_file_name || null,
                 created_at: r.created_at
             })),
-            recharges: anonymizedRecharges
+            recharges: rechargesRes.rows.map(r => ({
+                id: r.id,
+                amount: parseFloat(r.amount),
+                method: r.method,
+                timestamp: r.timestamp
+            }))
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
+    }
+});
+
+// Download / visualização pública de nota fiscal ou comprovante de compra
+app.get('/api/transparency/doc/:type/:id', async (req, res) => {
+    try {
+        const { type, id } = req.params;
+        const numId = parseInt(id);
+        if (isNaN(numId)) return res.status(400).send('ID inválido');
+
+        let row = null;
+        if (type === 'stock') {
+            const result = await pool.query(
+                'SELECT invoice_file_data, invoice_file_name, invoice_file_type FROM stock_history WHERE id = $1',
+                [numId]
+            );
+            row = result.rows[0];
+        } else if (type === 'extra') {
+            const result = await pool.query(
+                'SELECT invoice_file_data, invoice_file_name, invoice_file_type FROM extra_costs WHERE id = $1',
+                [numId]
+            );
+            row = result.rows[0];
+        }
+
+        if (!row || !row.invoice_file_data) {
+            return res.status(404).send('Nota fiscal ou documento não encontrado para esta movimentação.');
+        }
+
+        res.set('Content-Type', row.invoice_file_type || 'application/pdf');
+        res.set('Content-Disposition', `inline; filename="${encodeURIComponent(row.invoice_file_name || 'nota-fiscal')}"`);
+        res.send(row.invoice_file_data);
+    } catch (err) {
+        res.status(500).send(err.message);
     }
 });
 

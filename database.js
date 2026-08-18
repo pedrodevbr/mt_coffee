@@ -220,7 +220,14 @@ async function initSchema() {
         `);
 
         await client.query(`
-            UPDATE extra_costs SET remaining = amount WHERE remaining IS NULL
+            ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS invoice_file_data BYTEA;
+            ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS invoice_file_name TEXT;
+            ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS invoice_file_type TEXT;
+            ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS invoice_summary TEXT;
+
+            ALTER TABLE extra_costs ADD COLUMN IF NOT EXISTS invoice_file_data BYTEA;
+            ALTER TABLE extra_costs ADD COLUMN IF NOT EXISTS invoice_file_name TEXT;
+            ALTER TABLE extra_costs ADD COLUMN IF NOT EXISTS invoice_file_type TEXT;
         `);
 
         await client.query(`

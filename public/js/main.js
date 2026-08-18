@@ -983,64 +983,91 @@ document.addEventListener('DOMContentLoaded', () => {
     const transparencyModal = document.getElementById('transparency-modal');
     const btnShowTransparency = document.getElementById('btn-show-transparency');
     const closeTransparencyModal = document.getElementById('close-transparency-modal');
-    const tabAuditExpenses = document.getElementById('tab-audit-expenses');
+    const tabAuditPurchases = document.getElementById('tab-audit-purchases');
+    const tabAuditAdjustments = document.getElementById('tab-audit-adjustments');
     const tabAuditRecharges = document.getElementById('tab-audit-recharges');
-    const auditPanelExpenses = document.getElementById('audit-panel-expenses');
+    const auditPanelPurchases = document.getElementById('audit-panel-purchases');
+    const auditPanelAdjustments = document.getElementById('audit-panel-adjustments');
     const auditPanelRecharges = document.getElementById('audit-panel-recharges');
 
     async function loadTransparencyData() {
         try {
-            const matricula = currentUser ? currentUser.matricula : '';
-            const res = await fetch(`${API_URL}/transparency?matricula=${encodeURIComponent(matricula)}`);
+            const res = await fetch(`${API_URL}/transparency`);
             if (!res.ok) throw new Error('Falha ao carregar dados');
             const data = await res.json();
 
-            // KPIs
-            const s = data.summary || {};
-            document.getElementById('audit-total-recharged').textContent = `R$ ${fmtR(s.total_recharged)}`;
-            document.getElementById('audit-total-spent').textContent = `R$ ${fmtR(s.total_spent)}`;
-            document.getElementById('audit-cash-balance').textContent = `R$ ${fmtR(s.cash_balance)}`;
-            document.getElementById('audit-stock-level').textContent = `${(s.current_stock_grams || 0).toFixed(0)}g (~${s.remaining_doses || 0} doses)`;
-
-            // Compras de café
+            // 1. Compras de café
             const coffeeTbody = document.getElementById('audit-coffee-tbody');
             if (data.coffee_purchases && data.coffee_purchases.length > 0) {
-                coffeeTbody.innerHTML = data.coffee_purchases.map(p => `
-                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.06);">
-                        <td style="padding: 6px; color: var(--text-muted);">${new Date(p.timestamp).toLocaleDateString('pt-BR')}</td>
-                        <td style="padding: 6px; font-weight: 500;">${p.coffee_name}${p.origin ? ` <small style="opacity:0.7;">(${p.origin})</small>` : ''}</td>
-                        <td style="padding: 6px;">${p.grams}g</td>
-                        <td style="padding: 6px; color: #f87171;">R$ ${fmtR(p.cost)}</td>
-                        <td style="padding: 6px; color: #fbbf24;">R$ ${fmtR(p.cost_per_kg)}</td>
-                    </tr>
-                `).join('');
+                coffeeTbody.innerHTML = data.coffee_purchases.map(p => {
+                    const docBtn = p.has_invoice
+                        ? `<a href="${API_URL}/transparency/doc/stock/${p.id}" target="_blank" class="btn" style="padding: 2px 8px; font-size: 0.72rem; background: rgba(96,165,250,0.2); color: #60a5fa; border-radius: 4px; text-decoration: none; display: inline-block;">📄 Ver Nota</a>`
+                        : `<span style="color: var(--text-muted); opacity: 0.5;">-</span>`;
+                    return `
+                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.06);">
+                            <td style="padding: 6px; color: var(--text-muted);">${new Date(p.timestamp).toLocaleDateString('pt-BR')}</td>
+                            <td style="padding: 6px; font-weight: 500;">${p.coffee_name}${p.origin ? ` <small style="opacity:0.7;">(${p.origin})</small>` : ''}</td>
+                            <td style="padding: 6px;">${p.grams}g</td>
+                            <td style="padding: 6px; color: #f87171;">R$ ${fmtR(p.cost)}</td>
+                            <td style="padding: 6px; color: #fbbf24;">R$ ${fmtR(p.cost_per_kg)}</td>
+                            <td style="padding: 6px; text-align: center;">${docBtn}</td>
+                        </tr>
+                    `;
+                }).join('');
             } else {
-                coffeeTbody.innerHTML = '<tr><td colspan="5" style="padding: 10px; text-align: center; color: var(--text-muted);">Nenhuma remessa registrada.</td></tr>';
+                coffeeTbody.innerHTML = '<tr><td colspan="6" style="padding: 10px; text-align: center; color: var(--text-muted);">Nenhuma remessa registrada.</td></tr>';
             }
 
-            // Custos extras e infraestrutura
+            // 2. Custos extras e infraestrutura
             const extraTbody = document.getElementById('audit-extra-tbody');
             if (data.extra_costs && data.extra_costs.length > 0) {
-                extraTbody.innerHTML = data.extra_costs.map(e => `
-                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.06);">
-                        <td style="padding: 6px; color: var(--text-muted);">${new Date(e.created_at).toLocaleDateString('pt-BR')}</td>
-                        <td style="padding: 6px; font-weight: 500;">${e.description}</td>
-                        <td style="padding: 6px; color: #f87171;">R$ ${fmtR(e.amount)}</td>
-                        <td style="padding: 6px; color: #60a5fa;">${e.dilution_doses} doses</td>
-                    </tr>
-                `).join('');
+                extraTbody.innerHTML = data.extra_costs.map(e => {
+                    const docBtn = e.has_invoice
+                        ? `<a href="${API_URL}/transparency/doc/extra/${e.id}" target="_blank" class="btn" style="padding: 2px 8px; font-size: 0.72rem; background: rgba(96,165,250,0.2); color: #60a5fa; border-radius: 4px; text-decoration: none; display: inline-block;">📄 Comprovante</a>`
+                        : `<span style="color: var(--text-muted); opacity: 0.5;">-</span>`;
+                    return `
+                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.06);">
+                            <td style="padding: 6px; color: var(--text-muted);">${new Date(e.created_at).toLocaleDateString('pt-BR')}</td>
+                            <td style="padding: 6px; font-weight: 500;">${e.description}</td>
+                            <td style="padding: 6px; color: #f87171;">R$ ${fmtR(e.amount)}</td>
+                            <td style="padding: 6px; color: #60a5fa;">${e.dilution_doses} doses</td>
+                            <td style="padding: 6px; text-align: center;">${docBtn}</td>
+                        </tr>
+                    `;
+                }).join('');
             } else {
-                extraTbody.innerHTML = '<tr><td colspan="4" style="padding: 10px; text-align: center; color: var(--text-muted);">Nenhum custo extra lançado.</td></tr>';
+                extraTbody.innerHTML = '<tr><td colspan="5" style="padding: 10px; text-align: center; color: var(--text-muted);">Nenhum custo extra lançado.</td></tr>';
             }
 
-            // Recargas anonimizadas
+            // 3. Ajustes de estoque
+            const adjustmentsTbody = document.getElementById('audit-adjustments-tbody');
+            if (data.stock_adjustments && data.stock_adjustments.length > 0) {
+                adjustmentsTbody.innerHTML = data.stock_adjustments.map(a => {
+                    const deltaGramsFormatted = a.delta_grams > 0 ? `+${a.delta_grams}g` : `${a.delta_grams}g`;
+                    const deltaColor = a.delta_grams > 0 ? '#10b981' : '#f87171';
+                    return `
+                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.06);">
+                            <td style="padding: 6px; color: var(--text-muted);">${new Date(a.timestamp).toLocaleDateString('pt-BR')} ${new Date(a.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</td>
+                            <td style="padding: 6px;">${a.grams_before}g</td>
+                            <td style="padding: 6px; font-weight: 500;">${a.grams_after}g</td>
+                            <td style="padding: 6px; color: ${deltaColor}; font-weight: 600;">${deltaGramsFormatted}</td>
+                            <td style="padding: 6px; color: ${deltaColor};">R$ ${fmtR(Math.abs(a.delta_cost))}</td>
+                            <td style="padding: 6px; color: var(--text-muted); font-size: 0.74rem;">${a.reason}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } else {
+                adjustmentsTbody.innerHTML = '<tr><td colspan="6" style="padding: 10px; text-align: center; color: var(--text-muted);">Nenhum ajuste físico de estoque registrado.</td></tr>';
+            }
+
+            // 4. Recargas (sem coluna de colaborador)
             const rechargesTbody = document.getElementById('audit-recharges-tbody');
             if (data.recharges && data.recharges.length > 0) {
                 rechargesTbody.innerHTML = data.recharges.map(r => `
-                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.06); ${r.is_self ? 'background: rgba(16, 185, 129, 0.1);' : ''}">
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.06);">
                         <td style="padding: 6px; color: var(--text-muted);">${new Date(r.timestamp).toLocaleDateString('pt-BR')} ${new Date(r.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</td>
-                        <td style="padding: 6px; ${r.is_self ? 'color: #10b981; font-weight: 600;' : ''}">${r.user_display}</td>
                         <td style="padding: 6px; color: #10b981; font-weight: 600;">+ R$ ${fmtR(r.amount)}</td>
+                        <td style="padding: 6px; color: var(--text-muted);"><span style="background: rgba(255,255,255,0.08); padding: 2px 6px; border-radius: 4px; font-size: 0.72rem;">${r.method}</span></td>
                     </tr>
                 `).join('');
             } else {
@@ -1066,23 +1093,30 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    if (tabAuditExpenses && tabAuditRecharges) {
-        tabAuditExpenses.addEventListener('click', () => {
-            tabAuditExpenses.style.background = 'var(--accent)';
-            tabAuditExpenses.style.color = '#fff';
-            tabAuditRecharges.style.background = 'rgba(255,255,255,0.06)';
-            tabAuditRecharges.style.color = 'var(--text-muted)';
-            auditPanelExpenses.style.display = 'block';
-            auditPanelRecharges.style.display = 'none';
+    function selectTab(activeBtn, activePanel) {
+        const tabs = [tabAuditPurchases, tabAuditAdjustments, tabAuditRecharges];
+        const panels = [auditPanelPurchases, auditPanelAdjustments, auditPanelRecharges];
+
+        tabs.forEach(t => {
+            if (t) {
+                t.style.background = 'rgba(255,255,255,0.06)';
+                t.style.color = 'var(--text-muted)';
+            }
+        });
+        panels.forEach(p => {
+            if (p) p.style.display = 'none';
         });
 
-        tabAuditRecharges.addEventListener('click', () => {
-            tabAuditRecharges.style.background = 'var(--accent)';
-            tabAuditRecharges.style.color = '#fff';
-            tabAuditExpenses.style.background = 'rgba(255,255,255,0.06)';
-            tabAuditExpenses.style.color = 'var(--text-muted)';
-            auditPanelExpenses.style.display = 'none';
-            auditPanelRecharges.style.display = 'block';
-        });
+        if (activeBtn) {
+            activeBtn.style.background = 'var(--accent)';
+            activeBtn.style.color = '#fff';
+        }
+        if (activePanel) {
+            activePanel.style.display = 'block';
+        }
     }
+
+    if (tabAuditPurchases) tabAuditPurchases.addEventListener('click', () => selectTab(tabAuditPurchases, auditPanelPurchases));
+    if (tabAuditAdjustments) tabAuditAdjustments.addEventListener('click', () => selectTab(tabAuditAdjustments, auditPanelAdjustments));
+    if (tabAuditRecharges) tabAuditRecharges.addEventListener('click', () => selectTab(tabAuditRecharges, auditPanelRecharges));
 });
