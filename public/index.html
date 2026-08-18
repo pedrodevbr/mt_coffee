@@ -156,11 +156,14 @@
                             <span class="icon">📜</span> Histórico
                         </button>
                     </div>
+                    <button class="btn btn-outline" id="btn-show-transparency">
+                        <span class="icon">📊</span> Transparência & Auditoria
+                    </button>
                     <button class="btn btn-outline" id="btn-rate-coffees">
                         <span class="icon">⭐</span> Avaliar Cafés
                     </button>
                     <button class="btn btn-outline" id="btn-download-report">
-                        <span class="icon">📊</span> Baixar Relatório de Consumo
+                        <span class="icon">📑</span> Baixar Relatório de Consumo
                     </button>
                     <button class="btn btn-outline" id="btn-logout">
                         Sair
@@ -378,6 +381,106 @@
                 </p>
                 <div id="coffees-list-user">
                     <p style="color: var(--text-muted); text-align: center;">Carregando...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transparency & Audit Modal -->
+        <div class="modal hidden" id="transparency-modal">
+            <div class="modal-content glass-panel" style="max-height: 92vh; overflow-y: auto; max-width: 720px; width: 95%;">
+                <span class="close-btn" id="close-transparency-modal">&times;</span>
+                <h2>📊 Transparência & Auditoria ☕</h2>
+                <p class="modal-desc" style="margin-bottom: 14px; font-size: 0.85rem;">
+                    Prestação de contas 100% aberta dos custos de café e servidor, com privacidade preservada dos colaboradores.
+                </p>
+
+                <!-- KPI Grid -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 16px;">
+                    <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 10px; text-align: center;">
+                        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; text-transform: uppercase;">Arrecadado</span>
+                        <strong id="audit-total-recharged" style="font-size: 1.1rem; color: #10b981;">R$ --</strong>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 10px; text-align: center;">
+                        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; text-transform: uppercase;">Gastos Totais</span>
+                        <strong id="audit-total-spent" style="font-size: 1.1rem; color: #f87171;">R$ --</strong>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 10px; text-align: center;">
+                        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; text-transform: uppercase;">Saldo em Caixa</span>
+                        <strong id="audit-cash-balance" style="font-size: 1.1rem; color: #60a5fa;">R$ --</strong>
+                    </div>
+                    <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 10px; text-align: center;">
+                        <span style="font-size: 0.72rem; color: var(--text-muted); display: block; text-transform: uppercase;">Estoque Atual</span>
+                        <strong id="audit-stock-level" style="font-size: 1.1rem; color: #fbbf24;">-- g</strong>
+                    </div>
+                </div>
+
+                <!-- Tabs -->
+                <div style="display: flex; gap: 8px; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 6px;">
+                    <button type="button" id="tab-audit-expenses" class="btn" style="flex: 1; padding: 8px; font-size: 0.82rem; background: var(--accent); color: #fff; border-radius: 6px;">
+                        🛒 Saídas (Café & Servidor)
+                    </button>
+                    <button type="button" id="tab-audit-recharges" class="btn" style="flex: 1; padding: 8px; font-size: 0.82rem; background: rgba(255,255,255,0.06); color: var(--text-muted); border-radius: 6px;">
+                        💵 Entradas (Recargas Anonimizadas)
+                    </button>
+                </div>
+
+                <!-- Panel: Expenses (Café + Servidor) -->
+                <div id="audit-panel-expenses">
+                    <h4 style="margin: 8px 0 6px; font-size: 0.85rem; color: #60a5fa;">📦 Remessas de Café Adquiridas</h4>
+                    <div style="overflow-x: auto; margin-bottom: 14px;">
+                        <table class="data-table" style="width: 100%; font-size: 0.78rem; text-align: left;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.15); color: var(--text-muted);">
+                                    <th style="padding: 6px;">Data</th>
+                                    <th style="padding: 6px;">Café</th>
+                                    <th style="padding: 6px;">Peso</th>
+                                    <th style="padding: 6px;">Valor</th>
+                                    <th style="padding: 6px;">R$/kg</th>
+                                </tr>
+                            </thead>
+                            <tbody id="audit-coffee-tbody">
+                                <tr><td colspan="5" style="padding: 10px; text-align: center; color: var(--text-muted);">Carregando...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h4 style="margin: 8px 0 6px; font-size: 0.85rem; color: #fbbf24;">🖥️ Custos de Infraestrutura & Extras Diluídos</h4>
+                    <div style="overflow-x: auto;">
+                        <table class="data-table" style="width: 100%; font-size: 0.78rem; text-align: left;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.15); color: var(--text-muted);">
+                                    <th style="padding: 6px;">Data</th>
+                                    <th style="padding: 6px;">Descrição</th>
+                                    <th style="padding: 6px;">Valor</th>
+                                    <th style="padding: 6px;">Diluição</th>
+                                </tr>
+                            </thead>
+                            <tbody id="audit-extra-tbody">
+                                <tr><td colspan="4" style="padding: 10px; text-align: center; color: var(--text-muted);">Carregando...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Panel: Recharges (Anonimizadas) -->
+                <div id="audit-panel-recharges" style="display: none;">
+                    <p style="font-size: 0.76rem; color: var(--text-muted); margin-bottom: 8px;">
+                        🔒 Os nomes dos demais colaboradores são protegidos por privacidade. As suas próprias recargas aparecem identificadas.
+                    </p>
+                    <div style="overflow-x: auto; max-height: 380px; overflow-y: auto;">
+                        <table class="data-table" style="width: 100%; font-size: 0.78rem; text-align: left;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.15); color: var(--text-muted);">
+                                    <th style="padding: 6px;">Data/Hora</th>
+                                    <th style="padding: 6px;">Colaborador</th>
+                                    <th style="padding: 6px;">Valor</th>
+                                </tr>
+                            </thead>
+                            <tbody id="audit-recharges-tbody">
+                                <tr><td colspan="3" style="padding: 10px; text-align: center; color: var(--text-muted);">Carregando...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>

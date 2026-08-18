@@ -174,6 +174,124 @@ app.get('/api/system', async (req, res) => {
 });
 
 // =====================
+//  TRANSPARENCY & AUDIT (PUBLIC WITH PRIVACY MASKING)
+// =====================
+app.get('/api/transparency', async (req, res) => {
+    try {
+        const callerMatricula = String(req.query.matricula || '').trim();
+
+        // 1. Obter estado atual e cálculo do motor de custos
+        const calc = await recalculate(pool);
+
+        // 2. Totais acumulados de caixa
+        const totalsRes = await pool.query(`
+            SELECT
+                (SELECT COALESCE(SUM(amount), 0) FROM transactions WHERE type = 'recharge') AS total_recharged,
+                (SELECT COALESCE(SUM(added_cost), 0) FROM stock_history) AS total_coffee_spent,
+                (SELECT COALESCE(SUM(amount), 0) FROM extra_costs) AS total_extra_spent
+        `);
+        const totalRecharged = parseFloat(totalsRes.rows[0].total_recharged);
+        const totalCoffeeSpent = parseFloat(totalsRes.rows[0].total_coffee_spent);
+        const totalExtraSpent = parseFloat(totalsRes.rows[0].total_extra_spent);
+        const totalSpent = totalCoffeeSpent + totalExtraSpent;
+        const cashBalance = totalRecharged - totalSpent;
+
+        // 3. Histórico de compras de café (remessas)
+        const coffeePurchasesRes = await pool.query(`
+            SELECT sh.id, sh.added_grams, sh.added_cost, sh.timestamp,
+                   c.name AS coffee_name, c.origin AS coffee_origin,
+                   CASE WHEN sh.added_grams > 0 THEN ROUND((sh.added_cost / sh.added_grams * 1000)::numeric, 2) ELSE 0 END AS cost_per_kg
+            FROM stock_history sh
+            LEFT JOIN coffees c ON sh.coffee_id = c.id
+            ORDER BY sh.timestamp DESC
+            LIMIT 50
+        `);
+
+        // 4. Custos extras e infraestrutura
+        const extraCostsRes = await pool.query(`
+            SELECT id, description, amount, remaining, dilution_doses, created_at
+            FROM extra_costs
+            ORDER BY created_at DESC
+            LIMIT 50
+        `);
+
+        // 5. Histórico de recargas com anonimização dos demais usuários
+        const rechargesRes = await pool.query(`
+            SELECT t.id, t.amount, t.timestamp, u.name, u.matricula
+            FROM transactions t
+            JOIN users u ON t.user_id = u.id
+            WHERE t.type = 'recharge'
+            ORDER BY t.timestamp DESC
+            LIMIT 100
+        `);
+
+        function maskName(name) {
+            if (!name) return 'Colaborador';
+            const parts = name.trim().split(/\s+/);
+            return parts.map(p => {
+                if (p.length <= 2) return p;
+                return p.charAt(0) + '*'.repeat(Math.max(2, p.length - 2)) + p.charAt(p.length - 1);
+            }).join(' ');
+        }
+
+        function maskMatricula(mat) {
+            if (!mat) return '***';
+            if (mat.length <= 2) return '**';
+            return '***' + mat.slice(-2);
+        }
+
+        const anonymizedRecharges = rechargesRes.rows.map(r => {
+            const isSelf = callerMatricula && r.matricula === callerMatricula;
+            return {
+                id: r.id,
+                amount: parseFloat(r.amount),
+                timestamp: r.timestamp,
+                user_display: isSelf ? `${r.name} (Você)` : maskName(r.name),
+                matricula_display: isSelf ? r.matricula : maskMatricula(r.matricula),
+                is_self: isSelf
+            };
+        });
+
+        res.json({
+            summary: {
+                total_recharged: totalRecharged,
+                total_coffee_spent: totalCoffeeSpent,
+                total_extra_spent: totalExtraSpent,
+                total_spent: totalSpent,
+                cash_balance: cashBalance,
+                current_stock_grams: calc.currentStock,
+                remaining_doses: calc.remainingDoses,
+                current_price_per_dose: calc.currentPricePerDose,
+                base_price_per_dose: calc.basePricePerDose,
+                infra_cost_per_dose: calc.infraCostPerDose || 0,
+                monthly_estimated_doses: calc.monthlyDoses || 200,
+                total_consumptions: calc.totalConsumptions
+            },
+            coffee_purchases: coffeePurchasesRes.rows.map(r => ({
+                id: r.id,
+                grams: parseFloat(r.added_grams),
+                cost: parseFloat(r.added_cost),
+                cost_per_kg: parseFloat(r.cost_per_kg),
+                coffee_name: r.coffee_name || 'Café Especial',
+                origin: r.coffee_origin || '',
+                timestamp: r.timestamp
+            })),
+            extra_costs: extraCostsRes.rows.map(r => ({
+                id: r.id,
+                description: r.description,
+                amount: parseFloat(r.amount),
+                remaining: parseFloat(r.remaining),
+                dilution_doses: parseInt(r.dilution_doses) || 200,
+                created_at: r.created_at
+            })),
+            recharges: anonymizedRecharges
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// =====================
 //  SYSTEM ADMIN ROUTES (PROTECTED)
 // =====================
 app.post('/api/system/stock', requireAdmin, async (req, res) => {

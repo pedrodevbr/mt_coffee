@@ -976,4 +976,113 @@ document.addEventListener('DOMContentLoaded', () => {
     if (coffeesModal) coffeesModal.addEventListener('click', (e) => {
         if (e.target === coffeesModal) coffeesModal.classList.add('hidden');
     });
+
+    // ==========================================
+    //  TRANSPARENCY & AUDIT MODAL LOGIC
+    // ==========================================
+    const transparencyModal = document.getElementById('transparency-modal');
+    const btnShowTransparency = document.getElementById('btn-show-transparency');
+    const closeTransparencyModal = document.getElementById('close-transparency-modal');
+    const tabAuditExpenses = document.getElementById('tab-audit-expenses');
+    const tabAuditRecharges = document.getElementById('tab-audit-recharges');
+    const auditPanelExpenses = document.getElementById('audit-panel-expenses');
+    const auditPanelRecharges = document.getElementById('audit-panel-recharges');
+
+    async function loadTransparencyData() {
+        try {
+            const matricula = currentUser ? currentUser.matricula : '';
+            const res = await fetch(`${API_URL}/transparency?matricula=${encodeURIComponent(matricula)}`);
+            if (!res.ok) throw new Error('Falha ao carregar dados');
+            const data = await res.json();
+
+            // KPIs
+            const s = data.summary || {};
+            document.getElementById('audit-total-recharged').textContent = `R$ ${fmtR(s.total_recharged)}`;
+            document.getElementById('audit-total-spent').textContent = `R$ ${fmtR(s.total_spent)}`;
+            document.getElementById('audit-cash-balance').textContent = `R$ ${fmtR(s.cash_balance)}`;
+            document.getElementById('audit-stock-level').textContent = `${(s.current_stock_grams || 0).toFixed(0)}g (~${s.remaining_doses || 0} doses)`;
+
+            // Compras de café
+            const coffeeTbody = document.getElementById('audit-coffee-tbody');
+            if (data.coffee_purchases && data.coffee_purchases.length > 0) {
+                coffeeTbody.innerHTML = data.coffee_purchases.map(p => `
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.06);">
+                        <td style="padding: 6px; color: var(--text-muted);">${new Date(p.timestamp).toLocaleDateString('pt-BR')}</td>
+                        <td style="padding: 6px; font-weight: 500;">${p.coffee_name}${p.origin ? ` <small style="opacity:0.7;">(${p.origin})</small>` : ''}</td>
+                        <td style="padding: 6px;">${p.grams}g</td>
+                        <td style="padding: 6px; color: #f87171;">R$ ${fmtR(p.cost)}</td>
+                        <td style="padding: 6px; color: #fbbf24;">R$ ${fmtR(p.cost_per_kg)}</td>
+                    </tr>
+                `).join('');
+            } else {
+                coffeeTbody.innerHTML = '<tr><td colspan="5" style="padding: 10px; text-align: center; color: var(--text-muted);">Nenhuma remessa registrada.</td></tr>';
+            }
+
+            // Custos extras e infraestrutura
+            const extraTbody = document.getElementById('audit-extra-tbody');
+            if (data.extra_costs && data.extra_costs.length > 0) {
+                extraTbody.innerHTML = data.extra_costs.map(e => `
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.06);">
+                        <td style="padding: 6px; color: var(--text-muted);">${new Date(e.created_at).toLocaleDateString('pt-BR')}</td>
+                        <td style="padding: 6px; font-weight: 500;">${e.description}</td>
+                        <td style="padding: 6px; color: #f87171;">R$ ${fmtR(e.amount)}</td>
+                        <td style="padding: 6px; color: #60a5fa;">${e.dilution_doses} doses</td>
+                    </tr>
+                `).join('');
+            } else {
+                extraTbody.innerHTML = '<tr><td colspan="4" style="padding: 10px; text-align: center; color: var(--text-muted);">Nenhum custo extra lançado.</td></tr>';
+            }
+
+            // Recargas anonimizadas
+            const rechargesTbody = document.getElementById('audit-recharges-tbody');
+            if (data.recharges && data.recharges.length > 0) {
+                rechargesTbody.innerHTML = data.recharges.map(r => `
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.06); ${r.is_self ? 'background: rgba(16, 185, 129, 0.1);' : ''}">
+                        <td style="padding: 6px; color: var(--text-muted);">${new Date(r.timestamp).toLocaleDateString('pt-BR')} ${new Date(r.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</td>
+                        <td style="padding: 6px; ${r.is_self ? 'color: #10b981; font-weight: 600;' : ''}">${r.user_display}</td>
+                        <td style="padding: 6px; color: #10b981; font-weight: 600;">+ R$ ${fmtR(r.amount)}</td>
+                    </tr>
+                `).join('');
+            } else {
+                rechargesTbody.innerHTML = '<tr><td colspan="3" style="padding: 10px; text-align: center; color: var(--text-muted);">Nenhuma recarga recente.</td></tr>';
+            }
+        } catch (err) {
+            console.error('Erro ao carregar transparência:', err);
+        }
+    }
+
+    if (btnShowTransparency) {
+        btnShowTransparency.addEventListener('click', () => {
+            transparencyModal.classList.remove('hidden');
+            loadTransparencyData();
+        });
+    }
+    if (closeTransparencyModal) {
+        closeTransparencyModal.addEventListener('click', () => transparencyModal.classList.add('hidden'));
+    }
+    if (transparencyModal) {
+        transparencyModal.addEventListener('click', (e) => {
+            if (e.target === transparencyModal) transparencyModal.classList.add('hidden');
+        });
+    }
+
+    if (tabAuditExpenses && tabAuditRecharges) {
+        tabAuditExpenses.addEventListener('click', () => {
+            tabAuditExpenses.style.background = 'var(--accent)';
+            tabAuditExpenses.style.color = '#fff';
+            tabAuditRecharges.style.background = 'rgba(255,255,255,0.06)';
+            tabAuditRecharges.style.color = 'var(--text-muted)';
+            auditPanelExpenses.style.display = 'block';
+            auditPanelRecharges.style.display = 'none';
+        });
+
+        tabAuditRecharges.addEventListener('click', () => {
+            tabAuditRecharges.style.background = 'var(--accent)';
+            tabAuditRecharges.style.color = '#fff';
+            tabAuditExpenses.style.background = 'rgba(255,255,255,0.06)';
+            tabAuditExpenses.style.color = 'var(--text-muted)';
+            auditPanelExpenses.style.display = 'none';
+            auditPanelRecharges.style.display = 'block';
+        });
+    }
 });
