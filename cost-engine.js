@@ -24,15 +24,33 @@ async function withTransaction(callback) {
 // =====================
 
 async function gatherSourceData(db) {
-    const [settingResult, stockSum, consResult, adjResult, extraResult] = await Promise.all([
-        db.query("SELECT key, value FROM settings WHERE key IN ('dose_grams', 'extra_dilution_doses', 'mp_fee_percent')"),
+    const [settingResult, stockSum, consResult, adjResult, extraResult, monthlyDosesResult] = await Promise.all([
+        db.query("SELECT key, value FROM settings WHERE key IN ('dose_grams', 'extra_dilution_doses', 'mp_fee_percent', 'railway_monthly_cost')"),
         db.query('SELECT COALESCE(SUM(added_grams),0) AS tg, COALESCE(SUM(added_cost),0) AS tc FROM stock_history'),
         db.query("SELECT COUNT(*) AS cnt, COALESCE(SUM(grams_deducted),0) AS g, COALESCE(SUM(cost_deducted),0) AS c FROM transactions WHERE type='consumption'"),
         db.query('SELECT COALESCE(SUM(delta_grams),0) AS dg FROM stock_adjustments'),
         db.query(`SELECT COALESCE(SUM(amount),0) AS total,
                          COALESCE(SUM(remaining),0) AS total_remaining,
-                         COALESCE(SUM(LEAST(remaining, amount / NULLIF(dilution_doses,0))),0) AS per_dose_total
-                  FROM extra_costs WHERE remaining > 0`)
+                         COALESCE(SUM(LEAST(remaining, amount / NULLIF(dilution_doses,0))),0) AS per_dose_total,
+                         COALESCE(SUM(CASE WHEN (description ILIKE '%railway%' OR description ILIKE '%servidor%' OR description ILIKE '%infra%')
+                                           THEN LEAST(remaining, amount / NULLIF(dilution_doses,0)) ELSE 0 END), 0) AS infra_per_dose,
+                         COALESCE(SUM(CASE WHEN NOT (description ILIKE '%railway%' OR description ILIKE '%servidor%' OR description ILIKE '%infra%')
+                                           THEN LEAST(remaining, amount / NULLIF(dilution_doses,0)) ELSE 0 END), 0) AS other_extra_per_dose
+                  FROM extra_costs WHERE remaining > 0`),
+        db.query(`
+            SELECT COALESCE(
+                NULLIF((
+                    SELECT COUNT(*) FROM transactions 
+                    WHERE type = 'consumption' 
+                      AND timestamp >= NOW() - INTERVAL '30 days'
+                ), 0),
+                NULLIF(ROUND((
+                    SELECT COUNT(*)::float / GREATEST(1, COUNT(DISTINCT DATE(timestamp AT TIME ZONE 'America/Sao_Paulo'))) * 22
+                    FROM transactions WHERE type = 'consumption' AND EXTRACT(DOW FROM timestamp AT TIME ZONE 'America/Sao_Paulo') BETWEEN 1 AND 5
+                )), 0),
+                200
+            ) AS monthly_doses
+        `)
     ]);
 
     const settings = {};
@@ -41,25 +59,26 @@ async function gatherSourceData(db) {
     const doseGrams = parseFloat(settings.dose_grams) || 10;
     const dilutionDoses = parseInt(settings.extra_dilution_doses) || 200;
     const mpFeePercent = parseFloat(settings.mp_fee_percent) || 0;
+    const railwayMonthlyCost = parseFloat(settings.railway_monthly_cost) || 28.00;
+    const monthlyDoses = parseInt(monthlyDosesResult.rows[0]?.monthly_doses) || 200;
+
     const totalPurchasedGrams = parseFloat(stockSum.rows[0].tg);
     const totalPurchaseCost = parseFloat(stockSum.rows[0].tc);
     const totalConsumptions = parseInt(consResult.rows[0].cnt);
-    // Use the grams ACTUALLY deducted at the time of each consumption,
-    // so changing dose_grams setting later does not retroactively change stock.
     const consumedGrams = parseFloat(consResult.rows[0].g);
-    // Purchase cost ACTUALLY removed by past consumptions, recorded at the
-    // price-per-gram in effect at each consumption. Summing it keeps the
-    // per-dose price invariant to consumption (see calculateState).
     const consumedCost = parseFloat(consResult.rows[0].c);
     const adjGrams = parseFloat(adjResult.rows[0].dg);
     const extraTotal = parseFloat(extraResult.rows[0].total);
     const extraRemaining = parseFloat(extraResult.rows[0].total_remaining);
     const extraPerDoseTotal = parseFloat(extraResult.rows[0].per_dose_total);
+    const infraPerDose = parseFloat(extraResult.rows[0].infra_per_dose);
+    const otherExtraPerDose = parseFloat(extraResult.rows[0].other_extra_per_dose);
 
     return {
-        doseGrams, dilutionDoses, mpFeePercent, totalPurchasedGrams, totalPurchaseCost,
-        totalConsumptions, consumedGrams, consumedCost, adjGrams,
-        extraTotal, extraRemaining, extraPerDoseTotal
+        doseGrams, dilutionDoses, mpFeePercent, railwayMonthlyCost, monthlyDoses,
+        totalPurchasedGrams, totalPurchaseCost, totalConsumptions, consumedGrams,
+        consumedCost, adjGrams, extraTotal, extraRemaining, extraPerDoseTotal,
+        infraPerDose, otherExtraPerDose
     };
 }
 
@@ -69,32 +88,34 @@ async function gatherSourceData(db) {
 
 function calculateState(data) {
     const {
-        doseGrams, dilutionDoses, mpFeePercent, totalPurchasedGrams, totalPurchaseCost,
-        consumedGrams, consumedCost, adjGrams, extraTotal, extraRemaining, extraPerDoseTotal,
-        totalConsumptions
+        doseGrams, dilutionDoses, mpFeePercent, railwayMonthlyCost, monthlyDoses,
+        totalPurchasedGrams, totalPurchaseCost, consumedGrams, consumedCost,
+        adjGrams, extraTotal, extraRemaining, extraPerDoseTotal,
+        infraPerDose, otherExtraPerDose, totalConsumptions
     } = data;
 
     const currentStock = Math.max(0, totalPurchasedGrams - consumedGrams + adjGrams);
-
-    // Only consumption reduces purchase cost. Adjustments do NOT (sunk cost).
     const consumedFraction = totalPurchasedGrams > 0 ? Math.min(1, consumedGrams / totalPurchasedGrams) : 0;
-    // Remaining purchase cost is the total purchased cost minus the cost ACTUALLY
-    // removed by each past consumption (recorded at the then-current price/gram).
-    // Because each consumption removes (current price/gram × grams), the ratio
-    // remainingPurchaseCost / currentStock stays constant across consumptions —
-    // so the per-dose price does NOT drift after a consumption. It only moves on
-    // admin events (new stock, adjustments) as intended.
     const remainingPurchaseCost = Math.max(0, totalPurchaseCost - consumedCost);
 
-    // Base price: remaining purchase cost / remaining stock × dose
+    // Custo base dos grãos de café por dose
     let basePricePerDose = 0;
     if (currentStock > 0) {
         basePricePerDose = (remainingPurchaseCost / currentStock) * doseGrams;
     }
 
-    // Extra price: fixed per-dose from each active extra (amount / dilution_doses)
-    // extraPerDoseTotal = SUM( MIN(remaining, amount / dilution_doses) ) for active entries
-    const extraCostPerDose = extraPerDoseTotal;
+    // Custo de infraestrutura por dose (se já houver lançamento ativo em extra_costs ou diluído na média mensal de doses)
+    let infraCostPerDose = infraPerDose;
+    // Se não houver lançamento ativo em extra_costs mas houver custo configurado de railway, estima com base na média mensal
+    if (infraCostPerDose === 0 && railwayMonthlyCost > 0 && monthlyDoses > 0) {
+        infraCostPerDose = railwayMonthlyCost / monthlyDoses;
+    }
+
+    // Outros custos extras (filtros, embalagens, etc.)
+    const otherExtraCostPerDose = otherExtraPerDose;
+    const extraCostPerDose = infraCostPerDose + otherExtraCostPerDose;
+
+    // Subtotal antes da taxa de gateway
     const subtotalPerDose = basePricePerDose + extraCostPerDose;
 
     // Embutir taxa do Mercado Pago / Gateway se configurada
@@ -108,7 +129,9 @@ function calculateState(data) {
         currentStock, remainingPurchaseCost,
         remainingExtraCosts: extraRemaining,
         currentPricePerDose, basePricePerDose, extraCostPerDose,
+        infraCostPerDose, otherExtraCostPerDose,
         subtotalPerDose, feePerDose, mpFeePercent: feePct,
+        monthlyDoses, railwayMonthlyCost,
         remainingDoses, doseGrams, dilutionDoses, consumedFraction,
         extraTotal, totalPurchasedGrams, totalPurchaseCost, totalConsumptions
     };

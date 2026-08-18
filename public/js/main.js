@@ -222,19 +222,27 @@ document.addEventListener('DOMContentLoaded', () => {
         // Update price details breakdown
         if (dosePriceDetails) {
             const basePpd = parseFloat(systemState.base_price_per_dose || 0);
-            const extraPpd = parseFloat(systemState.extra_cost_per_dose || 0);
-            const remainingExtras = parseFloat(systemState.remaining_extra_costs || 0);
+            const infraPpd = parseFloat(systemState.infra_cost_per_dose || 0);
+            const otherExtraPpd = parseFloat(systemState.other_extra_cost_per_dose || 0);
+            const feePpd = parseFloat(systemState.fee_per_dose || 0);
+            const monthlyDoses = parseInt(systemState.monthly_estimated_doses || 200);
             const remainingCost = parseFloat(systemState.remaining_cost || 0);
             const stockGrams = parseFloat(systemState.coffee_stock_grams || 0);
-            const remainingDoses = parseInt(systemState.remaining_doses || 0);
             const doseGrams = parseFloat(systemState.dose_grams || 10);
             const currentPrice = parseFloat(systemState.current_price_per_dose || 0);
 
-            let html = `<div style="display:flex; justify-content:space-between;"><span style="opacity:0.7;">Café (R$ ${fmtR(remainingCost)} / ${stockGrams.toFixed(0)}g)</span><span>R$ ${fmtR4(basePpd)}</span></div>`;
-            if (remainingExtras > 0) {
-                html += `<div style="display:flex; justify-content:space-between;"><span style="opacity:0.7;">Extras (R$ ${fmtR(remainingExtras)} ÷ ${remainingDoses} doses)</span><span style="color:#f59e0b;">+ R$ ${fmtR4(extraPpd)}</span></div>`;
+            let html = `<div style="font-weight:600; margin-bottom:6px; color:#fbbf24;">Composição Transparente do Preço da Dose (${doseGrams.toFixed(0)}g):</div>`;
+            html += `<div style="display:flex; justify-content:space-between; margin-bottom:2px;"><span style="opacity:0.8;">☕ Grãos de Café (R$ ${fmtR(remainingCost)} / ${stockGrams.toFixed(0)}g)</span><span>R$ ${fmtR(basePpd)}</span></div>`;
+            if (infraPpd > 0) {
+                html += `<div style="display:flex; justify-content:space-between; margin-bottom:2px;"><span style="opacity:0.8;">🖥️ Servidor Railway (~${monthlyDoses} doses/mês)</span><span style="color:#60a5fa;">+ R$ ${fmtR(infraPpd)}</span></div>`;
             }
-            html += `<div style="display:flex; justify-content:space-between; font-weight:700; margin-top:4px; padding-top:4px; border-top:1px solid rgba(245,158,11,0.2);"><span>Total por dose (${doseGrams.toFixed(0)}g)</span><span style="color:#f59e0b;">R$ ${fmtR(currentPrice)}</span></div>`;
+            if (otherExtraPpd > 0) {
+                html += `<div style="display:flex; justify-content:space-between; margin-bottom:2px;"><span style="opacity:0.8;">📦 Insumos & Extras</span><span style="color:#f59e0b;">+ R$ ${fmtR(otherExtraPpd)}</span></div>`;
+            }
+            if (feePpd > 0) {
+                html += `<div style="display:flex; justify-content:space-between; margin-bottom:2px;"><span style="opacity:0.8;">💳 Taxa Mercado Pago (${systemState.mp_fee_percent || 0.99}%)</span><span style="color:#10b981;">+ R$ ${fmtR(feePpd)}</span></div>`;
+            }
+            html += `<div style="display:flex; justify-content:space-between; font-weight:700; margin-top:6px; padding-top:6px; border-top:1px solid rgba(245,158,11,0.25);"><span>Preço Final por Dose</span><span style="color:#10b981; font-size:0.95rem;">R$ ${fmtR(currentPrice)}</span></div>`;
             dosePriceDetails.innerHTML = html;
         }
 
