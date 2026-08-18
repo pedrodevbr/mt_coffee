@@ -327,60 +327,70 @@
         <!-- ===== TAB: DASHBOARD ===== -->
         <div class="tab-panel active" id="tab-dashboard">
             <div class="admin-dashboard">
-                <div class="glass-panel admin-card span-2">
-                    <p class="section-title">Visão Geral</p>
-                    <p class="section-sub">Dados de consumo atualizados em tempo real</p>
+                <!-- Top Executive Operational KPIs -->
+                <div class="glass-panel admin-card span-2" style="background: linear-gradient(135deg, rgba(245,158,11,0.08) 0%, rgba(255,255,255,0.02) 100%);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                        <div>
+                            <p class="section-title">☕ Visão Geral da Operação</p>
+                            <p class="section-sub">Métricas de consumo, estoque e precificação em tempo real</p>
+                        </div>
+                        <div id="dash-autonomy-badge" style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); color: #10b981; padding: 4px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600;">
+                            Estoque Saudável
+                        </div>
+                    </div>
                     <hr class="divider">
                     <div class="kpi-grid">
-                        <div class="kpi-card">
+                        <div class="kpi-card" style="border-color: rgba(245,158,11,0.3);">
+                            <div class="kpi-label">Preço Atual / Dose</div>
+                            <div class="kpi-value" id="kpi-dash-dose-price" style="color: #f59e0b;">R$ --</div>
+                            <div class="kpi-sub" id="kpi-dash-dose-breakdown">café + servidor + taxa</div>
+                        </div>
+                        <div class="kpi-card" style="border-color: rgba(96,165,250,0.3);">
+                            <div class="kpi-label">Estoque Físico</div>
+                            <div class="kpi-value" id="kpi-dash-stock-grams" style="color: #60a5fa;">-- g</div>
+                            <div class="kpi-sub" id="kpi-dash-stock-doses">~-- doses restantes</div>
+                        </div>
+                        <div class="kpi-card" style="border-color: rgba(16,185,129,0.3);">
                             <div class="kpi-label">Média Diária</div>
-                            <div class="kpi-value" id="kpi-avg-daily">--</div>
+                            <div class="kpi-value" id="kpi-avg-daily" style="color: #10b981;">--</div>
                             <div class="kpi-sub">doses / dia útil</div>
                         </div>
                         <div class="kpi-card">
-                            <div class="kpi-label">Este Mês</div>
+                            <div class="kpi-label">Doses Este Mês</div>
                             <div class="kpi-value" id="kpi-this-month">--</div>
-                            <div class="kpi-sub">consumos</div>
-                        </div>
-                        <div class="kpi-card">
-                            <div class="kpi-label">Total Histórico</div>
-                            <div class="kpi-value" id="kpi-total">--</div>
-                            <div class="kpi-sub">consumos registrados</div>
-                        </div>
-                        <div class="kpi-card">
-                            <div class="kpi-label">Dias com Consumo</div>
-                            <div class="kpi-value" id="kpi-days">--</div>
-                            <div class="kpi-sub">dias úteis</div>
+                            <div class="kpi-sub" id="kpi-total-sub">-- histórico total</div>
                         </div>
                     </div>
                 </div>
 
+                <!-- Users Credit / Liabilities Panel -->
                 <div class="glass-panel admin-card span-2">
-                    <p class="section-title">Crédito dos Usuários — Passivo do Admin</p>
-                    <p class="section-sub">Saldos pré-pagos representam café que o sistema deve aos usuários</p>
+                    <p class="section-title">Crédito dos Usuários & Exposição de Saldos</p>
+                    <p class="section-sub">Créditos pré-pagos (passivo do sistema) vs saldos negativos a receber (ativo)</p>
                     <hr class="divider">
-                    <div class="kpi-grid" style="grid-template-columns: repeat(3, 1fr);">
-                        <div class="kpi-card">
-                            <div class="kpi-label">Crédito a Entregar (Passivo)</div>
-                            <div class="kpi-value" id="kpi-credit-positive" style="color:#f87171;">R$ --</div>
-                            <div class="kpi-sub" id="kpi-credit-positive-sub">-- usuários com crédito</div>
+                    <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+                        <div class="kpi-card" style="background: rgba(248,113,113,0.06); border-color: rgba(248,113,113,0.2);">
+                            <div class="kpi-label" style="color: #f87171;">Crédito a Entregar (Passivo)</div>
+                            <div class="kpi-value" id="kpi-credit-positive" style="color: #f87171;">R$ --</div>
+                            <div class="kpi-sub" id="kpi-credit-positive-sub">-- colaboradores com crédito</div>
                         </div>
-                        <div class="kpi-card">
-                            <div class="kpi-label">A Receber dos Usuários (Ativo)</div>
-                            <div class="kpi-value" id="kpi-credit-negative" style="color:#4ade80;">R$ --</div>
-                            <div class="kpi-sub" id="kpi-credit-negative-sub">-- usuários no negativo</div>
+                        <div class="kpi-card" style="background: rgba(74,222,128,0.06); border-color: rgba(74,222,128,0.2);">
+                            <div class="kpi-label" style="color: #4ade80;">A Receber dos Usuários (Ativo)</div>
+                            <div class="kpi-value" id="kpi-credit-negative" style="color: #4ade80;">R$ --</div>
+                            <div class="kpi-sub" id="kpi-credit-negative-sub">-- colaboradores no negativo</div>
                         </div>
-                        <div class="kpi-card">
-                            <div class="kpi-label">Passivo Líquido</div>
+                        <div class="kpi-card" style="background: rgba(255,255,255,0.03);">
+                            <div class="kpi-label">Posição Líquida</div>
                             <div class="kpi-value" id="kpi-credit-net">R$ --</div>
                             <div class="kpi-sub" id="kpi-credit-net-sub">passivo − a receber</div>
                         </div>
                     </div>
                 </div>
 
+                <!-- Weekly Charts -->
                 <div class="glass-panel admin-card">
                     <p class="section-title">Consumos por Semana</p>
-                    <p class="section-sub">Número de doses — últimas 12 semanas</p>
+                    <p class="section-sub">Volume de doses consumidas — últimas 12 semanas</p>
                     <div class="chart-wrap">
                         <canvas id="chart-weekly-count"></canvas>
                     </div>
@@ -388,17 +398,22 @@
 
                 <div class="glass-panel admin-card">
                     <p class="section-title">Valor Consumido por Semana</p>
-                    <p class="section-sub">Total gasto (R$) — últimas 12 semanas</p>
+                    <p class="section-sub">Total movimentado (R$) — últimas 12 semanas</p>
                     <div class="chart-wrap">
                         <canvas id="chart-weekly-value"></canvas>
                     </div>
                 </div>
 
+                <!-- Top Consumers -->
                 <div class="glass-panel admin-card span-2">
-                    <p class="section-title">Consumo por Usuário</p>
-                    <p class="section-sub">Todos os usuários — últimos 30 dias</p>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <p class="section-title">🏆 Ranking de Consumo por Colaborador</p>
+                            <p class="section-sub">Todos os usuários registrados — últimos 30 dias</p>
+                        </div>
+                    </div>
                     <hr class="divider">
-                    <div id="top-users-list" style="max-height: 420px; overflow-y: auto; padding-right: 6px;">
+                    <div id="top-users-list" style="max-height: 400px; overflow-y: auto; padding-right: 6px;">
                         <p style="color: var(--text-muted); font-size: 0.85rem;">Carregando...</p>
                     </div>
                 </div>
@@ -408,113 +423,99 @@
         <!-- ===== TAB: FINANCEIRO ===== -->
         <div class="tab-panel" id="tab-financeiro">
             <div class="admin-dashboard">
+                <!-- Balanço Contábil & Patrimônio Líquido -->
+                <div class="glass-panel admin-card span-2" id="equity-card" style="background: linear-gradient(135deg, rgba(96,165,250,0.06) 0%, rgba(255,255,255,0.02) 100%);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                        <div>
+                            <p class="section-title">⚖️ Balanço Contábil & Patrimônio Líquido</p>
+                            <p class="section-sub">Ativos operacionais (caixa + estoque + a receber) vs Passivo (créditos devidos)</p>
+                        </div>
+                        <div id="eq-health-badge" style="background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.3); color: #10b981; padding: 4px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600;">
+                            Saúde Financeira Positiva
+                        </div>
+                    </div>
+                    <hr class="divider">
+
+                    <!-- Ativos e Passivos no Momento -->
+                    <p style="font-size:0.78rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; margin:2px 0 10px;">Ativos vs Passivos (Situação Atual)</p>
+                    <div class="kpi-grid" style="grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom: 14px;">
+                        <div class="kpi-card">
+                            <div class="kpi-label">Estoque Valorado</div>
+                            <div class="kpi-value" id="eq-stock" style="color:#60a5fa;">R$ --</div>
+                            <div class="kpi-sub" id="eq-stock-sub">-- g em café</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Saldo em Caixa</div>
+                            <div class="kpi-value" id="eq-cash" style="color:#4ade80;">R$ --</div>
+                            <div class="kpi-sub">recargas − gastos</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Contas a Receber</div>
+                            <div class="kpi-value" id="eq-receivable" style="color:#fbbf24;">R$ --</div>
+                            <div class="kpi-sub" id="eq-receivable-sub">-- devedores</div>
+                        </div>
+                        <div class="kpi-card" style="border-color: rgba(248,113,113,0.3);">
+                            <div class="kpi-label">Créditos dos Usuários</div>
+                            <div class="kpi-value" id="eq-credits" style="color:#f87171;">R$ --</div>
+                            <div class="kpi-sub" id="eq-credits-sub">-- com crédito</div>
+                        </div>
+                    </div>
+
+                    <!-- Síntese do Patrimônio Líquido -->
+                    <div class="kpi-grid" style="grid-template-columns: 1fr 1fr; margin-bottom: 8px;">
+                        <div class="kpi-card" style="background: rgba(255,255,255,0.04);">
+                            <div class="kpi-label">Total de Ativos Reais</div>
+                            <div class="kpi-value" id="eq-assets" style="color:#60a5fa;">R$ --</div>
+                            <div class="kpi-sub">estoque + caixa + a receber</div>
+                        </div>
+                        <div class="kpi-card" style="border:1px solid rgba(255,255,255,0.18); background: rgba(0,0,0,0.3);">
+                            <div class="kpi-label">Patrimônio Líquido</div>
+                            <div class="kpi-value" id="eq-net">R$ --</div>
+                            <div class="kpi-sub" id="eq-net-sub">ativos − créditos devidos</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Demonstrativo Acumulado (DRE Operacional) -->
                 <div class="glass-panel admin-card span-2" id="balance-card">
-                    <p class="section-title">Remessas vs Cobrado dos Usuários</p>
-                    <p class="section-sub">Custo total do café comprado × valor efetivamente recarregado pelos usuários</p>
+                    <p class="section-title">📊 Demonstrativo Acumulado (Entradas × Saídas)</p>
+                    <p class="section-sub">Histórico total consolidado de arrecadação, compras de café e custos extras</p>
                     <hr class="divider">
                     <div class="kpi-grid" style="margin-bottom: 16px;">
                         <div class="kpi-card">
-                            <div class="kpi-label">Custo das Remessas</div>
-                            <div class="kpi-value" id="bal-stock-cost" style="color:#f87171;">R$ --</div>
-                            <div class="kpi-sub" id="bal-remessas-count">-- remessas</div>
-                        </div>
-                        <div class="kpi-card">
-                            <div class="kpi-label">Arrecadado (recargas)</div>
+                            <div class="kpi-label">Arrecadado em Recargas</div>
                             <div class="kpi-value" id="bal-collected" style="color:#4ade80;">R$ --</div>
                             <div class="kpi-sub" id="bal-consumptions-count">-- recargas</div>
                         </div>
                         <div class="kpi-card">
-                            <div class="kpi-label">Balanço</div>
+                            <div class="kpi-label">Compras de Café</div>
+                            <div class="kpi-value" id="bal-stock-cost" style="color:#f87171;">R$ --</div>
+                            <div class="kpi-sub" id="bal-remessas-count">-- remessas</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Infra & Custos Extras</div>
+                            <div class="kpi-value" id="eq-hist-extra" style="color:#f87171;">R$ --</div>
+                            <div class="kpi-sub">servidor e outros</div>
+                        </div>
+                        <div class="kpi-card">
+                            <div class="kpi-label">Balanço de Caixa</div>
                             <div class="kpi-value" id="bal-balance">R$ --</div>
                             <div class="kpi-sub" id="bal-balance-label">--</div>
                         </div>
-                        <div class="kpi-card">
-                            <div class="kpi-label">Valor Consumido</div>
-                            <div class="kpi-value" id="bal-recharged" style="color:#60a5fa;">R$ --</div>
-                            <div class="kpi-sub">pelos usuários</div>
-                        </div>
                     </div>
+
                     <div id="bal-bar-wrap" style="margin-bottom: 16px; display:none;">
                         <div style="display:flex; justify-content:space-between; font-size:0.78rem; color:var(--text-muted); margin-bottom: 6px;">
-                            <span>Cobertura dos custos</span>
+                            <span>Cobertura de Custos de Reposição</span>
                             <span id="bal-coverage-pct">--%</span>
                         </div>
                         <div style="background:rgba(255,255,255,0.08); border-radius:6px; height:10px; overflow:hidden;">
                             <div id="bal-coverage-bar" style="height:100%; border-radius:6px; transition: width 0.8s ease; width:0%;"></div>
                         </div>
                     </div>
-                    <div class="chart-wrap" style="height:200px;">
+
+                    <div class="chart-wrap" style="height:220px;">
                         <canvas id="chart-balance-weekly"></canvas>
-                    </div>
-                    <p style="font-size:0.75rem; color:var(--text-muted); margin-top:8px; text-align:center;">
-                        * Custo das remessas registrado a partir da implantação do histórico de estoque
-                    </p>
-                </div>
-
-                <div class="glass-panel admin-card span-2" id="equity-card">
-                    <p class="section-title">Patrimônio — Passivo × Ativos</p>
-                    <p class="section-sub">Ativos (estoque + caixa + a receber) menos o passivo (créditos devidos aos usuários)</p>
-                    <hr class="divider">
-
-                    <p style="font-size:0.8rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; margin:4px 0 12px;">No Momento</p>
-                    <div class="kpi-grid" style="grid-template-columns: repeat(4, 1fr); margin-bottom: 14px;">
-                        <div class="kpi-card">
-                            <div class="kpi-label">Estoque</div>
-                            <div class="kpi-value" id="eq-stock" style="color:#60a5fa;">R$ --</div>
-                            <div class="kpi-sub" id="eq-stock-sub">-- g em estoque</div>
-                        </div>
-                        <div class="kpi-card">
-                            <div class="kpi-label">Caixa</div>
-                            <div class="kpi-value" id="eq-cash" style="color:#4ade80;">R$ --</div>
-                            <div class="kpi-sub">recargas − compras</div>
-                        </div>
-                        <div class="kpi-card">
-                            <div class="kpi-label">A Receber</div>
-                            <div class="kpi-value" id="eq-receivable" style="color:#fbbf24;">R$ --</div>
-                            <div class="kpi-sub" id="eq-receivable-sub">-- usuários no negativo</div>
-                        </div>
-                        <div class="kpi-card">
-                            <div class="kpi-label">Créditos Devidos (Passivo)</div>
-                            <div class="kpi-value" id="eq-credits" style="color:#f87171;">R$ --</div>
-                            <div class="kpi-sub" id="eq-credits-sub">-- usuários com crédito</div>
-                        </div>
-                    </div>
-                    <div class="kpi-grid" style="grid-template-columns: repeat(2, 1fr); margin-bottom: 8px;">
-                        <div class="kpi-card">
-                            <div class="kpi-label">Total de Ativos</div>
-                            <div class="kpi-value" id="eq-assets" style="color:#60a5fa;">R$ --</div>
-                            <div class="kpi-sub">estoque + caixa + a receber</div>
-                        </div>
-                        <div class="kpi-card" style="border:1px solid rgba(255,255,255,0.12);">
-                            <div class="kpi-label">Patrimônio Líquido</div>
-                            <div class="kpi-value" id="eq-net">R$ --</div>
-                            <div class="kpi-sub" id="eq-net-sub">ativos − passivo</div>
-                        </div>
-                    </div>
-
-                    <hr class="divider">
-                    <p style="font-size:0.8rem; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; margin:4px 0 12px;">Histórico (Acumulado)</p>
-                    <div class="kpi-grid" style="grid-template-columns: repeat(4, 1fr);">
-                        <div class="kpi-card">
-                            <div class="kpi-label">Total Arrecadado</div>
-                            <div class="kpi-value" id="eq-hist-recharged" style="color:#4ade80;">R$ --</div>
-                            <div class="kpi-sub" id="eq-hist-recharges-sub">-- recargas</div>
-                        </div>
-                        <div class="kpi-card">
-                            <div class="kpi-label">Total em Remessas</div>
-                            <div class="kpi-value" id="eq-hist-stock" style="color:#f87171;">R$ --</div>
-                            <div class="kpi-sub" id="eq-hist-remessas-sub">-- remessas</div>
-                        </div>
-                        <div class="kpi-card">
-                            <div class="kpi-label">Custos Extras</div>
-                            <div class="kpi-value" id="eq-hist-extra" style="color:#f87171;">R$ --</div>
-                            <div class="kpi-sub">frete e afins</div>
-                        </div>
-                        <div class="kpi-card">
-                            <div class="kpi-label">Total Consumido</div>
-                            <div class="kpi-value" id="eq-hist-consumed" style="color:#60a5fa;">R$ --</div>
-                            <div class="kpi-sub" id="eq-hist-consumos-sub">-- consumos</div>
-                        </div>
                     </div>
                 </div>
             </div>

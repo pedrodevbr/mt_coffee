@@ -285,28 +285,73 @@ document.addEventListener('DOMContentLoaded', () => {
     // =====================
     async function loadStats() {
         try {
-            const [weeklyRes, avgRes] = await Promise.all([
+            const [weeklyRes, avgRes, stateRes] = await Promise.all([
                 authFetch(`${API_URL}/stats/weekly`),
-                authFetch(`${API_URL}/stats/daily-average`)
+                authFetch(`${API_URL}/stats/daily-average`),
+                authFetch(`${API_URL}/system/state`)
             ]);
             if (!weeklyRes.ok || !avgRes.ok) return;
             const weekly = await weeklyRes.json();
             const avg = await avgRes.json();
-            renderKPIs(avg);
+            const state = stateRes.ok ? await stateRes.json() : null;
+            renderKPIs(avg, state);
             renderWeeklyCharts(weekly);
-            renderTopUsers(avg.top_users_last_30_days);
+            renderTopUsers(avg.top_users_last_30_days, state);
         } catch (err) {
             console.error('Error loading stats:', err);
         }
     }
 
-    function renderKPIs(data) {
-        document.getElementById('kpi-avg-daily').textContent =
-            data.avg_daily_business_days > 0 ? data.avg_daily_business_days.toFixed(1) : '0';
-        document.getElementById('kpi-this-month').textContent = data.this_month_consumptions;
-        document.getElementById('kpi-total').textContent = data.total_consumptions_overall;
-        document.getElementById('kpi-days').textContent = data.total_business_days_with_consumption;
+    function renderKPIs(data, state) {
+        // Preço por dose e estoque operacional
+        const currentPrice = state ? parseFloat(state.current_price_per_dose || 0) : 0;
+        const stockGrams = state ? parseFloat(state.coffee_stock_grams || 0) : 0;
+        const remainingDoses = state ? parseInt(state.remaining_doses || 0) : 0;
+        const doseGrams = state ? parseFloat(state.dose_grams || 14) : 14;
+        const basePpd = state ? parseFloat(state.base_price_per_dose || 0) : 0;
+        const infraPpd = state ? parseFloat(state.infra_cost_per_dose || 0) : 0;
+        const feePpd = state ? parseFloat(state.fee_per_dose || 0) : 0;
 
+        const priceEl = document.getElementById('kpi-dash-dose-price');
+        if (priceEl) priceEl.textContent = `R$ ${fmtR(currentPrice)}`;
+        const breakdownEl = document.getElementById('kpi-dash-dose-breakdown');
+        if (breakdownEl) breakdownEl.textContent = `Café R$ ${fmtR(basePpd)} · Infra R$ ${fmtR(infraPpd)} · Taxa R$ ${fmtR(feePpd)}`;
+
+        const stockGramsEl = document.getElementById('kpi-dash-stock-grams');
+        if (stockGramsEl) stockGramsEl.textContent = `${stockGrams.toFixed(0)} g`;
+        const stockDosesEl = document.getElementById('kpi-dash-stock-doses');
+        if (stockDosesEl) stockDosesEl.textContent = `~${remainingDoses} doses restantes`;
+
+        const avgDaily = data.avg_daily_business_days > 0 ? data.avg_daily_business_days : 0;
+        document.getElementById('kpi-avg-daily').textContent = avgDaily > 0 ? avgDaily.toFixed(1) : '0';
+        document.getElementById('kpi-this-month').textContent = data.this_month_consumptions;
+        const totalSub = document.getElementById('kpi-total-sub');
+        if (totalSub) totalSub.textContent = `${data.total_consumptions_overall} no total histórico`;
+
+        // Autonomia do Estoque
+        const badgeEl = document.getElementById('dash-autonomy-badge');
+        if (badgeEl) {
+            const dailyGrams = avgDaily > 0 ? (avgDaily * doseGrams) : (5 * doseGrams);
+            const daysLeft = dailyGrams > 0 ? Math.round(stockGrams / dailyGrams) : 0;
+            if (stockGrams <= 200) {
+                badgeEl.style.background = 'rgba(248,113,113,0.15)';
+                badgeEl.style.borderColor = 'rgba(248,113,113,0.3)';
+                badgeEl.style.color = '#f87171';
+                badgeEl.textContent = '⚠️ Estoque Crítico (Reabastecer)';
+            } else if (daysLeft <= 7) {
+                badgeEl.style.background = 'rgba(245,158,11,0.15)';
+                badgeEl.style.borderColor = 'rgba(245,158,11,0.3)';
+                badgeEl.style.color = '#f59e0b';
+                badgeEl.textContent = `⚡ Autonomia: ~${daysLeft} dias úteis`;
+            } else {
+                badgeEl.style.background = 'rgba(16,185,129,0.15)';
+                badgeEl.style.borderColor = 'rgba(16,185,129,0.3)';
+                badgeEl.style.color = '#10b981';
+                badgeEl.textContent = `✓ Autonomia: ~${daysLeft} dias úteis (${remainingDoses} doses)`;
+            }
+        }
+
+        // Passivo e Ativos de Usuários
         const fmtBRL = v => 'R$ ' + Math.abs(parseFloat(v || 0)).toFixed(2).replace('.', ',');
         const pos = parseFloat(data.users_total_positive_credit || 0);
         const neg = Math.abs(parseFloat(data.users_total_negative_credit || 0));
@@ -329,9 +374,9 @@ document.addEventListener('DOMContentLoaded', () => {
             netSubEl.textContent = 'em equilíbrio';
         }
         document.getElementById('kpi-credit-positive-sub').textContent =
-            `${data.users_count_positive || 0} usuário${data.users_count_positive === 1 ? '' : 's'} com crédito`;
+            `${data.users_count_positive || 0} colaborador${data.users_count_positive === 1 ? '' : 'es'} com crédito`;
         document.getElementById('kpi-credit-negative-sub').textContent =
-            `${data.users_count_negative || 0} usuário${data.users_count_negative === 1 ? '' : 's'} no negativo`;
+            `${data.users_count_negative || 0} colaborador${data.users_count_negative === 1 ? '' : 'es'} no negativo`;
     }
 
     function renderWeeklyCharts(rows) {
@@ -382,32 +427,42 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    function renderTopUsers(users) {
+    function renderTopUsers(users, state) {
         const el = document.getElementById('top-users-list');
         if (!users || users.length === 0) {
             el.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">Nenhum usuário cadastrado.</p>';
             return;
         }
+        const dosePrice = state ? parseFloat(state.current_price_per_dose || 1.90) : 1.90;
         const counts = users.map(u => parseInt(u.consumption_count));
         const max = counts.length ? Math.max(...counts) : 0;
         const totalConsumers = counts.filter(c => c > 0).length;
         const totalDoses = counts.reduce((s, c) => s + c, 0);
-        const headerHtml = `<p style="color: var(--text-muted); font-size: 0.78rem; margin-bottom: 12px;">
-            ${totalConsumers} de ${users.length} usuários consumiram (${totalDoses} doses no total)
+        const headerHtml = `<p style="color: var(--text-muted); font-size: 0.78rem; margin-bottom: 14px;">
+            ${totalConsumers} de ${users.length} colaboradores consumiram <strong>${totalDoses} doses</strong> nos últimos 30 dias (estimativa: <strong>R$ ${fmtR(totalDoses * dosePrice)}</strong>)
         </p>`;
-        el.innerHTML = headerHtml + users.map(u => {
+        el.innerHTML = headerHtml + users.map((u, idx) => {
             const count = parseInt(u.consumption_count);
             const pct = max > 0 ? (count / max) * 100 : 0;
             const inactive = count === 0;
             const opacity = inactive ? '0.45' : '1';
-            const countColor = inactive ? 'var(--text-muted)' : 'var(--text-primary)';
+            const countColor = inactive ? 'var(--text-muted)' : '#f59e0b';
+            const initial = u.name ? u.name.charAt(0).toUpperCase() : '?';
+            const medal = idx === 0 && count > 0 ? '🥇 ' : idx === 1 && count > 0 ? '🥈 ' : idx === 2 && count > 0 ? '🥉 ' : '';
             return `
-                <div class="top-user-row" style="opacity:${opacity};">
-                    <span class="top-user-name" title="${u.name}">${u.name.split(' ')[0]}</span>
-                    <div class="top-user-bar-wrap">
-                        <div class="top-user-bar" style="width: ${pct}%"></div>
+                <div class="top-user-row" style="opacity:${opacity}; display:flex; align-items:center; gap:12px; margin-bottom:12px; background:rgba(255,255,255,0.02); padding:6px 10px; border-radius:8px;">
+                    <div style="width:28px; height:28px; border-radius:50%; background:rgba(245,158,11,0.2); color:#f59e0b; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:0.8rem; flex-shrink:0;">
+                        ${initial}
                     </div>
-                    <span class="top-user-count" style="color:${countColor};">${count}</span>
+                    <div style="flex:1; min-width:0;">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:4px; font-size:0.85rem;">
+                            <span style="font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${u.name}">${medal}${u.name}</span>
+                            <span style="color:${countColor}; font-weight:600;">${count} doses <small style="color:var(--text-muted); font-weight:normal;">(R$ ${fmtR(count * dosePrice)})</small></span>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.06); border-radius:4px; height:6px; overflow:hidden;">
+                            <div style="background:linear-gradient(90deg, #f59e0b, #fbbf24); height:100%; width:${pct}%; border-radius:4px; transition:width 0.5s;"></div>
+                        </div>
+                    </div>
                 </div>`;
         }).join('');
     }
@@ -950,6 +1005,21 @@ document.addEventListener('DOMContentLoaded', () => {
             netEl.textContent = fmt(net);
             netEl.style.color = net >= 0 ? '#4ade80' : '#f87171';
             netSub.textContent = net >= 0 ? 'superávit (ativos − passivo)' : 'déficit (ativos − passivo)';
+
+            const healthBadge = document.getElementById('eq-health-badge');
+            if (healthBadge) {
+                if (net >= 0) {
+                    healthBadge.style.background = 'rgba(16,185,129,0.15)';
+                    healthBadge.style.borderColor = 'rgba(16,185,129,0.3)';
+                    healthBadge.style.color = '#10b981';
+                    healthBadge.textContent = `✓ Superávit Patrimonial (+${fmt(net)})`;
+                } else {
+                    healthBadge.style.background = 'rgba(248,113,113,0.15)';
+                    healthBadge.style.borderColor = 'rgba(248,113,113,0.3)';
+                    healthBadge.style.color = '#f87171';
+                    healthBadge.textContent = `⚠️ Déficit Patrimonial (-${fmt(Math.abs(net))})`;
+                }
+            }
 
             // --- Histórico ---
             document.getElementById('eq-hist-recharged').textContent = fmt(h.total_arrecadado);
