@@ -301,22 +301,32 @@ app.get('/api/transparency/doc/:type/:id', async (req, res) => {
 // =====================
 //  SYSTEM ADMIN ROUTES (PROTECTED)
 // =====================
-app.post('/api/system/stock', requireAdmin, async (req, res) => {
-    const { added_grams, added_cost } = req.body;
-    if (!added_grams || added_grams <= 0) return res.status(400).json({ error: "Invalid grams" });
+app.post('/api/system/stock', requireAdmin, uploadDocument.single('nota'), async (req, res) => {
+    const { added_grams, added_cost, coffee_id } = req.body;
+    if (!added_grams || added_grams <= 0) return res.status(400).json({ error: "Quantidade de gramas inválida." });
     const grams = parseFloat(added_grams);
     const cost = parseFloat(added_cost || 0);
+    const coffeeId = (coffee_id && !isNaN(parseInt(coffee_id))) ? parseInt(coffee_id) : null;
+
+    let fileBuffer = req.file ? req.file.buffer : null;
+    let fileName = req.file ? req.file.originalname : null;
+    let fileType = req.file ? req.file.mimetype : null;
+
     try {
         const calc = await withTransaction(async (client) => {
-            await client.query('INSERT INTO stock_history (added_grams, added_cost) VALUES ($1, $2)', [grams, cost]);
+            const insRes = await client.query(
+                `INSERT INTO stock_history (added_grams, added_cost, coffee_id, invoice_file_data, invoice_file_name, invoice_file_type)
+                 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+                [grams, cost, coffeeId, fileBuffer, fileName, fileType]
+            );
             const c = await recalculate(client);
             await client.query(
-                'UPDATE stock_history SET price_per_dose = $1 WHERE id = (SELECT MAX(id) FROM stock_history)',
-                [c.currentPricePerDose]
+                'UPDATE stock_history SET price_per_dose = $1 WHERE id = $2',
+                [c.currentPricePerDose, insRes.rows[0].id]
             );
             return c;
         });
-        res.json({ success: true, message: "Stock updated successfully", newStock: calc.currentStock });
+        res.json({ success: true, message: "Remessa adicionada ao estoque com sucesso!", newStock: calc.currentStock });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -352,13 +362,16 @@ app.get('/api/admin/stock-history', requireAdmin, async (req, res) => {
         const doseRes = await pool.query("SELECT value FROM settings WHERE key='dose_grams'");
         const doseGrams = parseFloat(doseRes.rows[0]?.value) || 10;
         const result = await pool.query(`
-            SELECT id, added_grams, added_cost,
-                   CASE WHEN added_grams > 0 THEN ROUND((added_cost / added_grams * $1)::numeric, 4) ELSE 0 END AS price_per_dose,
-                   CASE WHEN added_grams > 0 THEN ROUND((added_cost / added_grams * 1000)::numeric, 2) ELSE 0 END AS cost_per_kg,
-                   timestamp
-            FROM stock_history
-            ORDER BY timestamp DESC
-            LIMIT 30
+            SELECT sh.id, sh.added_grams, sh.added_cost,
+                   sh.invoice_file_name, (sh.invoice_file_data IS NOT NULL) AS has_invoice,
+                   c.name AS coffee_name,
+                   CASE WHEN sh.added_grams > 0 THEN ROUND((sh.added_cost / sh.added_grams * $1)::numeric, 4) ELSE 0 END AS price_per_dose,
+                   CASE WHEN sh.added_grams > 0 THEN ROUND((sh.added_cost / sh.added_grams * 1000)::numeric, 2) ELSE 0 END AS cost_per_kg,
+                   sh.timestamp
+            FROM stock_history sh
+            LEFT JOIN coffees c ON sh.coffee_id = c.id
+            ORDER BY sh.timestamp DESC
+            LIMIT 50
         `, [doseGrams]);
         res.json(result.rows);
     } catch (err) {

@@ -438,51 +438,54 @@ document.addEventListener('DOMContentLoaded', () => {
                     const remainingExtras = parseFloat(state.remaining_extra_costs || 0);
                     const remainingCost = parseFloat(state.remaining_cost || 0);
                     const basePpd = parseFloat(state.base_price_per_dose || 0);
-                    const extraPpd = parseFloat(state.extra_cost_per_dose || 0);
+                    const infraPpd = parseFloat(state.infra_cost_per_dose || 0);
+                    const otherExtraPpd = parseFloat(state.other_extra_cost_per_dose || 0);
+                    const feePpd = parseFloat(state.fee_per_dose || 0);
+                    const mpFeePercent = parseFloat(state.mp_fee_percent || 0.99);
+                    const monthlyDoses = parseInt(state.monthly_estimated_doses || 200);
                     const doseGrams = parseFloat(state.dose_grams || 10);
                     const remainingDoses = parseInt(state.remaining_doses || 0);
                     const totalConsumptions = parseInt(state.total_consumptions || 0);
                     const currentPrice = parseFloat(state.current_price_per_dose || 0);
                     const stockGrams = parseFloat(state.coffee_stock_grams || 0);
-                    const baseCostPerGram = stockGrams > 0 ? remainingCost / stockGrams : 0;
                     const extrasConsumed = extraTotal - remainingExtras;
                     const extrasPercent = extraTotal > 0 ? Math.round((extrasConsumed / extraTotal) * 100) : 0;
 
                     breakdownEl.innerHTML = `
                         <div style="background:rgba(245,158,11,0.06); border:1px solid rgba(245,158,11,0.2); border-radius:10px; padding:14px; margin-top:12px; font-size:0.8rem; line-height:1.8;">
-                            <div style="font-weight:600; margin-bottom:8px; color:#f59e0b; font-size:0.85rem;">Como o preço da dose é calculado</div>
+                            <div style="font-weight:600; margin-bottom:8px; color:#f59e0b; font-size:0.85rem;">Composição da Dose (${doseGrams.toFixed(0)}g)</div>
 
-                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Investimento total (histórico)</div>
-                            <div style="display:flex; justify-content:space-between;"><span>Compras de café</span><span>R$ ${fmtR(totalCost)} / ${totalGrams.toFixed(0)}g</span></div>
-                            <div style="display:flex; justify-content:space-between;"><span>Custos extras (frete, etc.)</span><span style="color:#f59e0b;">R$ ${fmtR(extraTotal)}</span></div>
+                            <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                                <span style="color:var(--text-muted);">☕ Grãos de Café (R$ ${fmtR(remainingCost)} / ${stockGrams.toFixed(0)}g)</span>
+                                <strong>R$ ${fmtR4(basePpd)}</strong>
+                            </div>
+                            <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                                <span style="color:var(--text-muted);">🖥️ Servidor Railway (~${monthlyDoses} doses/mês)</span>
+                                <strong style="color:#60a5fa;">+ R$ ${fmtR4(infraPpd)}</strong>
+                            </div>
+                            ${otherExtraPpd > 0 ? `
+                            <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                                <span style="color:var(--text-muted);">📦 Insumos & Extras Diluídos</span>
+                                <strong style="color:#f59e0b;">+ R$ ${fmtR4(otherExtraPpd)}</strong>
+                            </div>` : ''}
+                            <div style="display:flex; justify-content:space-between; margin-bottom:2px;">
+                                <span style="color:var(--text-muted);">💳 Taxa Mercado Pago (${mpFeePercent}%)</span>
+                                <strong style="color:#10b981;">+ R$ ${fmtR4(feePpd)}</strong>
+                            </div>
 
-                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
+                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.2); margin:8px 0;">
 
-                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Saldo restante no estoque</div>
-                            <div style="display:flex; justify-content:space-between;"><span>Custo café restante</span><span>R$ ${fmtR(remainingCost)} / ${stockGrams.toFixed(0)}g</span></div>
-                            <div style="display:flex; justify-content:space-between;"><span>Extras a diluir</span><span style="color:#f59e0b;">R$ ${fmtR(remainingExtras)} <span style="opacity:0.6; font-size:0.72rem;">(${extrasPercent}% absorvido)</span></span></div>
-
-                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
-
-                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Fórmula da dose</div>
-                            <div style="background:rgba(0,0,0,0.15); border-radius:6px; padding:8px 10px; font-family:monospace; font-size:0.78rem; margin-bottom:6px;">
-                                <div style="color:var(--text-muted);">base = R$ ${fmtR(remainingCost)} ÷ ${stockGrams.toFixed(0)}g × ${doseGrams.toFixed(0)}g = <strong style="color:var(--text-primary);">R$ ${fmtR4(basePpd)}</strong></div>
-                                ${remainingExtras > 0 ? `<div style="color:var(--text-muted); margin-top:2px;">extras = soma fixa/dose dos custos ativos = <strong style="color:#f59e0b;">R$ ${fmtR4(extraPpd)}</strong></div>` : ''}
-                                <div style="color:var(--text-muted); margin-top:2px;">total = R$ ${fmtR4(basePpd)}${remainingExtras > 0 ? ` + R$ ${fmtR4(extraPpd)}` : ''} = <strong style="color:#f59e0b;">R$ ${fmtR(currentPrice)}</strong></div>
+                            <div style="display:flex; justify-content:space-between; font-weight:700; font-size:0.95rem;">
+                                <span>Preço Final por Dose</span>
+                                <span style="color:#10b981;">R$ ${fmtR(currentPrice)}</span>
                             </div>
 
                             <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
 
-                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Composição por dose</div>
-                            <div style="display:flex; justify-content:space-between;"><span>Café (R$ ${fmtR4(baseCostPerGram)}/g × ${doseGrams.toFixed(0)}g)</span><span>R$ ${fmtR4(basePpd)}</span></div>
-                            ${remainingExtras > 0 ? `<div style="display:flex; justify-content:space-between;"><span>Extras (valor fixo/dose × ${parseInt(state.dilution_doses || 200)} doses)</span><span style="color:#f59e0b;">+ R$ ${fmtR4(extraPpd)}</span></div>` : ''}
-                            <div style="display:flex; justify-content:space-between; font-weight:700; font-size:0.88rem; margin-top:4px; padding-top:4px; border-top:1px solid rgba(245,158,11,0.2);"><span>Preço final/dose</span><span style="color:#f59e0b;">R$ ${fmtR(currentPrice)}</span></div>
-
-                            <hr style="border:none; border-top:1px solid rgba(245,158,11,0.15); margin:8px 0;">
-
-                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Status</div>
+                            <div style="color:var(--text-muted); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px;">Status Operacional</div>
                             <div style="display:flex; justify-content:space-between;"><span>Estoque restante</span><span>${stockGrams.toFixed(0)}g (${remainingDoses} doses)</span></div>
-                            <div style="display:flex; justify-content:space-between;"><span>Doses consumidas</span><span>${totalConsumptions}</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>Doses consumidas no histórico</span><span>${totalConsumptions}</span></div>
+                            <div style="display:flex; justify-content:space-between;"><span>Média de consumo</span><span>~${monthlyDoses} doses/mês</span></div>
                         </div>`;
                 }
 
@@ -709,12 +712,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 const cost = parseFloat(r.added_cost).toFixed(2).replace('.', ',');
                 const price = parseFloat(r.price_per_dose || 0).toFixed(3).replace('.', ',');
                 const ts = new Date(r.timestamp).toISOString().slice(0, 16);
+                const docBtn = r.has_invoice
+                    ? `<a href="${API_URL}/transparency/doc/stock/${r.id}" target="_blank" style="padding: 2px 8px; font-size: 0.72rem; background: rgba(96,165,250,0.2); color: #60a5fa; border-radius: 4px; text-decoration: none; display: inline-block;">📄 Nota</a>`
+                    : `<span style="color: var(--text-muted); opacity: 0.5;">-</span>`;
                 return `<tr>
                     <td>${date}</td>
                     <td>${parseFloat(r.added_grams).toFixed(0)} g</td>
                     <td>R$ ${cost}</td>
                     <td>R$ ${costPer}</td>
                     <td>R$ ${price}</td>
+                    <td style="text-align:center;">${docBtn}</td>
                     <td>
                         <button class="btn-edit-remessa" data-id="${r.id}" data-grams="${r.added_grams}" data-cost="${r.added_cost}" data-ts="${ts}"
                             style="background:none;border:1px solid rgba(255,255,255,0.2);color:var(--text-muted);border-radius:5px;padding:2px 8px;cursor:pointer;font-size:0.78rem;margin-right:4px;">✏️</button>
@@ -730,7 +737,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.addEventListener('click', () => deleteRemessa(btn.dataset.id));
             });
         } catch (err) {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--danger)">Erro ao carregar histórico</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--danger)">Erro ao carregar histórico</td></tr>';
         }
     }
 
@@ -1641,6 +1648,9 @@ document.addEventListener('DOMContentLoaded', () => {
     async function handleAddStock() {
         const grams = parseFloat(addGramsInput.value);
         const cost = parseFloat(addCostInput.value);
+        const fileInput = document.getElementById('add-stock-invoice');
+        const invoiceFile = fileInput ? fileInput.files[0] : null;
+
         if (isNaN(grams) || grams <= 0) {
             showMessage(stockMsg, 'Insira a quantidade em gramas.', true);
             return;
@@ -1648,20 +1658,41 @@ document.addEventListener('DOMContentLoaded', () => {
         btnAddStock.disabled = true;
         btnAddStock.textContent = 'Adicionando...';
         try {
-            const res = await authFetch(`${API_URL}/system/stock`, {
-                method: 'POST',
-                headers: authHeaders(),
-                body: JSON.stringify({ added_grams: grams, added_cost: isNaN(cost) ? 0 : cost })
-            });
+            let res;
+            if (invoiceFile) {
+                const formData = new FormData();
+                formData.append('added_grams', grams);
+                formData.append('added_cost', isNaN(cost) ? 0 : cost);
+                formData.append('nota', invoiceFile);
+                const token = getAuthToken();
+                const headers = {};
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+                res = await fetch(`${API_URL}/system/stock`, {
+                    method: 'POST',
+                    headers,
+                    body: formData
+                });
+            } else {
+                res = await authFetch(`${API_URL}/system/stock`, {
+                    method: 'POST',
+                    headers: authHeaders(),
+                    body: JSON.stringify({ added_grams: grams, added_cost: isNaN(cost) ? 0 : cost })
+                });
+            }
+
             if (res.ok) {
                 showMessage(stockMsg, 'Estoque adicionado com sucesso!');
                 addGramsInput.value = '';
                 addCostInput.value = '';
+                if (fileInput) fileInput.value = '';
                 loadSystemState();
                 loadStockHistory();
                 loadPriceHistory();
                 loadBalanceCard();
                 loadEquityCard();
+            } else {
+                const errData = await res.json();
+                showMessage(stockMsg, errData.error || 'Erro ao adicionar estoque.', true);
             }
         } catch {
             showMessage(stockMsg, 'Erro de conexão', true);
