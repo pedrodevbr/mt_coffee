@@ -319,7 +319,6 @@
             </button>
             <button class="tab-btn" data-tab="estoque">Estoque</button>
             <button class="tab-btn" data-tab="usuarios">Usuários</button>
-            <button class="tab-btn" data-tab="analise">Análise</button>
             <button class="tab-btn" data-tab="cafes">Cafés</button>
             <button class="tab-btn" data-tab="config">Configurações</button>
         </nav>
@@ -743,51 +742,6 @@
                             </thead>
                             <tbody id="history-tbody">
                                 <tr><td colspan="6" style="text-align:center;">Carregando...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- ===== TAB: ANÁLISE ===== -->
-        <div class="tab-panel" id="tab-analise">
-            <div class="admin-dashboard">
-                <div class="glass-panel admin-card span-2">
-                    <p class="section-title">Quem não está registrando o consumo</p>
-                    <p style="color: var(--text-muted); font-size: 0.85rem; margin: 6px 0 16px;">
-                        Não é possível ver diretamente o café consumido sem registro. Esta análise usa indicadores
-                        — tempo desde o último registro, ritmo histórico × recente e se a pessoa segue ativa
-                        (saldo/recarga) — para apontar quem provavelmente consome mas não lança.
-                    </p>
-                    <div class="kpi-grid">
-                        <div class="kpi-card"><div class="kpi-label">Risco alto</div><div class="kpi-value" id="an-risco-alto" style="color:#f87171;">–</div><div class="kpi-sub">provável consumo sem registro</div></div>
-                        <div class="kpi-card"><div class="kpi-label">Risco médio</div><div class="kpi-value" id="an-risco-medio" style="color:#fbbf24;">–</div><div class="kpi-sub">registro irregular / em queda</div></div>
-                        <div class="kpi-card"><div class="kpi-label">Em dia</div><div class="kpi-value" id="an-ativos" style="color:#4ade80;">–</div><div class="kpi-sub">registrando normalmente</div></div>
-                        <div class="kpi-card"><div class="kpi-label">Sem registro há 30+ dias</div><div class="kpi-value" id="an-sem30">–</div><div class="kpi-sub">já registraram antes</div></div>
-                        <div class="kpi-card"><div class="kpi-label">Nunca registraram</div><div class="kpi-value" id="an-nunca">–</div><div class="kpi-sub">zero consumos lançados</div></div>
-                    </div>
-                </div>
-
-                <div class="glass-panel admin-card table-container span-2">
-                    <h3 style="margin-bottom:15px;">Detalhe por usuário</h3>
-                    <div style="overflow-x:auto;">
-                        <table class="data-table" id="analise-table">
-                            <thead>
-                                <tr>
-                                    <th>Risco</th>
-                                    <th>Nome</th>
-                                    <th>Matrícula</th>
-                                    <th>Situação</th>
-                                    <th title="Dias desde o último consumo registrado">Sem registrar</th>
-                                    <th title="Consumos registrados nos últimos 30 dias">Últ. 30d</th>
-                                    <th title="Ritmo histórico de consumos por semana">Ritmo/sem</th>
-                                    <th title="Consumos esperados em 30 dias mantendo o ritmo">Esperado 30d</th>
-                                    <th>Saldo</th>
-                                </tr>
-                            </thead>
-                            <tbody id="analise-tbody">
-                                <tr><td colspan="9" style="text-align:center;">Carregando...</td></tr>
                             </tbody>
                         </table>
                     </div>

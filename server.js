@@ -142,7 +142,7 @@ app.post('/api/admin/pin', requireAdmin, async (req, res) => {
 // =====================
 //  SYSTEM STATE (PUBLIC)
 // =====================
-app.get('/api/system', async (req, res) => {
+app.get(['/api/system', '/api/system/state'], async (req, res) => {
     try {
         const calc = await recalculate(pool);
         const stateResult = await pool.query('SELECT * FROM system_state ORDER BY id DESC LIMIT 1');

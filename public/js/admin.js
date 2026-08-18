@@ -234,7 +234,6 @@ document.addEventListener('DOMContentLoaded', () => {
         loadReceipts();
         loadExtraCosts();
         loadAdjustments();
-        loadAnalysis();
         loadIntegrationsConfig();
     }
 
@@ -285,98 +284,119 @@ document.addEventListener('DOMContentLoaded', () => {
     // =====================
     async function loadStats() {
         try {
-            const [weeklyRes, avgRes, stateRes] = await Promise.all([
+            const [weeklyRes, avgRes, stateRes] = await Promise.allSettled([
                 authFetch(`${API_URL}/stats/weekly`),
                 authFetch(`${API_URL}/stats/daily-average`),
-                authFetch(`${API_URL}/system/state`)
+                fetch(`${API_URL}/system`)
             ]);
-            if (!weeklyRes.ok || !avgRes.ok) return;
-            const weekly = await weeklyRes.json();
-            const avg = await avgRes.json();
-            const state = stateRes.ok ? await stateRes.json() : null;
+
+            const weekly = (weeklyRes.status === 'fulfilled' && weeklyRes.value.ok) ? await weeklyRes.value.json() : [];
+            const avg = (avgRes.status === 'fulfilled' && avgRes.value.ok) ? await avgRes.value.json() : {};
+            const state = (stateRes.status === 'fulfilled' && stateRes.value.ok) ? await stateRes.value.json() : null;
+
             renderKPIs(avg, state);
-            renderWeeklyCharts(weekly);
-            renderTopUsers(avg.top_users_last_30_days, state);
+            if (Array.isArray(weekly) && weekly.length > 0) {
+                renderWeeklyCharts(weekly);
+            }
+            if (avg && avg.top_users_last_30_days) {
+                renderTopUsers(avg.top_users_last_30_days, state);
+            }
         } catch (err) {
             console.error('Error loading stats:', err);
         }
     }
 
     function renderKPIs(data, state) {
+        data = data || {};
         // Preço por dose e estoque operacional
-        const currentPrice = state ? parseFloat(state.current_price_per_dose || 0) : 0;
-        const stockGrams = state ? parseFloat(state.coffee_stock_grams || 0) : 0;
-        const remainingDoses = state ? parseInt(state.remaining_doses || 0) : 0;
-        const doseGrams = state ? parseFloat(state.dose_grams || 14) : 14;
-        const basePpd = state ? parseFloat(state.base_price_per_dose || 0) : 0;
-        const infraPpd = state ? parseFloat(state.infra_cost_per_dose || 0) : 0;
-        const feePpd = state ? parseFloat(state.fee_per_dose || 0) : 0;
+        if (state) {
+            const currentPrice = parseFloat(state.current_price_per_dose || 0);
+            const stockGrams = parseFloat(state.coffee_stock_grams || 0);
+            const remainingDoses = parseInt(state.remaining_doses || 0);
+            const doseGrams = parseFloat(state.dose_grams || 14);
+            const basePpd = parseFloat(state.base_price_per_dose || 0);
+            const infraPpd = parseFloat(state.infra_cost_per_dose || 0);
+            const feePpd = parseFloat(state.fee_per_dose || 0);
 
-        const priceEl = document.getElementById('kpi-dash-dose-price');
-        if (priceEl) priceEl.textContent = `R$ ${fmtR(currentPrice)}`;
-        const breakdownEl = document.getElementById('kpi-dash-dose-breakdown');
-        if (breakdownEl) breakdownEl.textContent = `Café R$ ${fmtR(basePpd)} · Infra R$ ${fmtR(infraPpd)} · Taxa R$ ${fmtR(feePpd)}`;
+            const priceEl = document.getElementById('kpi-dash-dose-price');
+            if (priceEl) priceEl.textContent = `R$ ${fmtR(currentPrice)}`;
+            const breakdownEl = document.getElementById('kpi-dash-dose-breakdown');
+            if (breakdownEl) breakdownEl.textContent = `Café R$ ${fmtR(basePpd)} · Infra R$ ${fmtR(infraPpd)} · Taxa R$ ${fmtR(feePpd)}`;
 
-        const stockGramsEl = document.getElementById('kpi-dash-stock-grams');
-        if (stockGramsEl) stockGramsEl.textContent = `${stockGrams.toFixed(0)} g`;
-        const stockDosesEl = document.getElementById('kpi-dash-stock-doses');
-        if (stockDosesEl) stockDosesEl.textContent = `~${remainingDoses} doses restantes`;
+            const stockGramsEl = document.getElementById('kpi-dash-stock-grams');
+            if (stockGramsEl) stockGramsEl.textContent = `${stockGrams.toFixed(0)} g`;
+            const stockDosesEl = document.getElementById('kpi-dash-stock-doses');
+            if (stockDosesEl) stockDosesEl.textContent = `~${remainingDoses} doses restantes`;
 
-        const avgDaily = data.avg_daily_business_days > 0 ? data.avg_daily_business_days : 0;
-        document.getElementById('kpi-avg-daily').textContent = avgDaily > 0 ? avgDaily.toFixed(1) : '0';
-        document.getElementById('kpi-this-month').textContent = data.this_month_consumptions;
-        const totalSub = document.getElementById('kpi-total-sub');
-        if (totalSub) totalSub.textContent = `${data.total_consumptions_overall} no total histórico`;
-
-        // Autonomia do Estoque
-        const badgeEl = document.getElementById('dash-autonomy-badge');
-        if (badgeEl) {
-            const dailyGrams = avgDaily > 0 ? (avgDaily * doseGrams) : (5 * doseGrams);
-            const daysLeft = dailyGrams > 0 ? Math.round(stockGrams / dailyGrams) : 0;
-            if (stockGrams <= 200) {
-                badgeEl.style.background = 'rgba(248,113,113,0.15)';
-                badgeEl.style.borderColor = 'rgba(248,113,113,0.3)';
-                badgeEl.style.color = '#f87171';
-                badgeEl.textContent = '⚠️ Estoque Crítico (Reabastecer)';
-            } else if (daysLeft <= 7) {
-                badgeEl.style.background = 'rgba(245,158,11,0.15)';
-                badgeEl.style.borderColor = 'rgba(245,158,11,0.3)';
-                badgeEl.style.color = '#f59e0b';
-                badgeEl.textContent = `⚡ Autonomia: ~${daysLeft} dias úteis`;
-            } else {
-                badgeEl.style.background = 'rgba(16,185,129,0.15)';
-                badgeEl.style.borderColor = 'rgba(16,185,129,0.3)';
-                badgeEl.style.color = '#10b981';
-                badgeEl.textContent = `✓ Autonomia: ~${daysLeft} dias úteis (${remainingDoses} doses)`;
+            const avgDaily = data.avg_daily_business_days > 0 ? data.avg_daily_business_days : 0;
+            const badgeEl = document.getElementById('dash-autonomy-badge');
+            if (badgeEl) {
+                const dailyGrams = avgDaily > 0 ? (avgDaily * doseGrams) : (5 * doseGrams);
+                const daysLeft = dailyGrams > 0 ? Math.round(stockGrams / dailyGrams) : 0;
+                if (stockGrams <= 200) {
+                    badgeEl.style.background = 'rgba(248,113,113,0.15)';
+                    badgeEl.style.borderColor = 'rgba(248,113,113,0.3)';
+                    badgeEl.style.color = '#f87171';
+                    badgeEl.textContent = '⚠️ Estoque Crítico (Reabastecer)';
+                } else if (daysLeft <= 7) {
+                    badgeEl.style.background = 'rgba(245,158,11,0.15)';
+                    badgeEl.style.borderColor = 'rgba(245,158,11,0.3)';
+                    badgeEl.style.color = '#f59e0b';
+                    badgeEl.textContent = `⚡ Autonomia: ~${daysLeft} dias úteis`;
+                } else {
+                    badgeEl.style.background = 'rgba(16,185,129,0.15)';
+                    badgeEl.style.borderColor = 'rgba(16,185,129,0.3)';
+                    badgeEl.style.color = '#10b981';
+                    badgeEl.textContent = `✓ Autonomia: ~${daysLeft} dias úteis (${remainingDoses} doses)`;
+                }
             }
         }
+
+        const avgDaily = data.avg_daily_business_days > 0 ? data.avg_daily_business_days : 0;
+        const avgDailyEl = document.getElementById('kpi-avg-daily');
+        if (avgDailyEl) avgDailyEl.textContent = avgDaily > 0 ? avgDaily.toFixed(1) : '0';
+
+        const thisMonthEl = document.getElementById('kpi-this-month');
+        if (thisMonthEl) thisMonthEl.textContent = data.this_month_consumptions != null ? data.this_month_consumptions : '--';
+
+        const totalSub = document.getElementById('kpi-total-sub');
+        if (totalSub) totalSub.textContent = `${data.total_consumptions_overall || 0} no total histórico`;
 
         // Passivo e Ativos de Usuários
         const fmtBRL = v => 'R$ ' + Math.abs(parseFloat(v || 0)).toFixed(2).replace('.', ',');
         const pos = parseFloat(data.users_total_positive_credit || 0);
         const neg = Math.abs(parseFloat(data.users_total_negative_credit || 0));
         const net = pos - neg;
-        document.getElementById('kpi-credit-positive').textContent = fmtBRL(pos);
-        document.getElementById('kpi-credit-negative').textContent = fmtBRL(neg);
+
+        const creditPosEl = document.getElementById('kpi-credit-positive');
+        if (creditPosEl) creditPosEl.textContent = fmtBRL(pos);
+
+        const creditNegEl = document.getElementById('kpi-credit-negative');
+        if (creditNegEl) creditNegEl.textContent = fmtBRL(neg);
+
         const netEl = document.getElementById('kpi-credit-net');
         const netSubEl = document.getElementById('kpi-credit-net-sub');
-        if (net > 0) {
-            netEl.textContent = fmtBRL(net);
-            netEl.style.color = '#f87171';
-            netSubEl.textContent = 'passivo líquido (devido aos usuários)';
-        } else if (net < 0) {
-            netEl.textContent = fmtBRL(net);
-            netEl.style.color = '#4ade80';
-            netSubEl.textContent = 'ativo líquido (a receber dos usuários)';
-        } else {
-            netEl.textContent = 'R$ 0,00';
-            netEl.style.color = 'var(--text-primary)';
-            netSubEl.textContent = 'em equilíbrio';
+        if (netEl && netSubEl) {
+            if (net > 0) {
+                netEl.textContent = fmtBRL(net);
+                netEl.style.color = '#f87171';
+                netSubEl.textContent = 'passivo líquido (devido aos colaboradores)';
+            } else if (net < 0) {
+                netEl.textContent = fmtBRL(net);
+                netEl.style.color = '#4ade80';
+                netSubEl.textContent = 'ativo líquido (a receber dos colaboradores)';
+            } else {
+                netEl.textContent = 'R$ 0,00';
+                netEl.style.color = 'var(--text-primary)';
+                netSubEl.textContent = 'em equilíbrio';
+            }
         }
-        document.getElementById('kpi-credit-positive-sub').textContent =
-            `${data.users_count_positive || 0} colaborador${data.users_count_positive === 1 ? '' : 'es'} com crédito`;
-        document.getElementById('kpi-credit-negative-sub').textContent =
-            `${data.users_count_negative || 0} colaborador${data.users_count_negative === 1 ? '' : 'es'} no negativo`;
+
+        const creditPosSub = document.getElementById('kpi-credit-positive-sub');
+        if (creditPosSub) creditPosSub.textContent = `${data.users_count_positive || 0} colaborador${data.users_count_positive === 1 ? '' : 'es'} com crédito`;
+
+        const creditNegSub = document.getElementById('kpi-credit-negative-sub');
+        if (creditNegSub) creditNegSub.textContent = `${data.users_count_negative || 0} colaborador${data.users_count_negative === 1 ? '' : 'es'} no negativo`;
     }
 
     function renderWeeklyCharts(rows) {
@@ -480,6 +500,24 @@ document.addEventListener('DOMContentLoaded', () => {
                 const state = await res.json();
                 adminCurrentStock.textContent = `${parseFloat(state.coffee_stock_grams).toFixed(0)} g`;
                 adminDosePrice.textContent = `R$ ${fmtR(state.current_price_per_dose)}`;
+
+                // Preencher elementos do Dashboard
+                const priceEl = document.getElementById('kpi-dash-dose-price');
+                if (priceEl) priceEl.textContent = `R$ ${fmtR(state.current_price_per_dose)}`;
+
+                const breakdownSummaryEl = document.getElementById('kpi-dash-dose-breakdown');
+                if (breakdownSummaryEl) {
+                    const basePpd = parseFloat(state.base_price_per_dose || 0);
+                    const infraPpd = parseFloat(state.infra_cost_per_dose || 0);
+                    const feePpd = parseFloat(state.fee_per_dose || 0);
+                    breakdownSummaryEl.textContent = `Café R$ ${fmtR(basePpd)} · Infra R$ ${fmtR(infraPpd)} · Taxa R$ ${fmtR(feePpd)}`;
+                }
+
+                const stockGramsEl = document.getElementById('kpi-dash-stock-grams');
+                if (stockGramsEl) stockGramsEl.textContent = `${parseFloat(state.coffee_stock_grams).toFixed(0)} g`;
+
+                const stockDosesEl = document.getElementById('kpi-dash-stock-doses');
+                if (stockDosesEl) stockDosesEl.textContent = `~${parseInt(state.remaining_doses || 0)} doses restantes`;
 
                 const adjVirtualEl = document.getElementById('adjust-virtual-stock');
                 if (adjVirtualEl) adjVirtualEl.textContent = `${parseFloat(state.coffee_stock_grams).toFixed(0)} g`;
@@ -1034,60 +1072,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 `${h.consumos_count || 0} consumo${h.consumos_count === 1 ? '' : 's'}`;
         } catch (err) {
             console.error('Error loading equity card:', err);
-        }
-    }
-
-    async function loadAnalysis() {
-        const tbody = document.getElementById('analise-tbody');
-        try {
-            const res = await authFetch(`${API_URL}/admin/stats/consumption-analysis`);
-            if (!res.ok) return;
-            const data = await res.json();
-            const r = data.resumo || {};
-
-            const setTxt = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
-            setTxt('an-risco-alto', r.risco_alto ?? 0);
-            setTxt('an-risco-medio', r.risco_medio ?? 0);
-            setTxt('an-ativos', r.ativos ?? 0);
-            setTxt('an-sem30', r.sem_registro_30d ?? 0);
-            setTxt('an-nunca', r.nunca_registraram ?? 0);
-
-            if (!tbody) return;
-            const usuarios = data.usuarios || [];
-            if (usuarios.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">Nenhum usuário.</td></tr>';
-                return;
-            }
-
-            const riscoBadge = {
-                alto:  '<span style="background:rgba(248,113,113,0.15); color:#f87171; padding:2px 9px; border-radius:10px; font-size:0.72rem; font-weight:700;">ALTO</span>',
-                medio: '<span style="background:rgba(251,191,36,0.15); color:#fbbf24; padding:2px 9px; border-radius:10px; font-size:0.72rem; font-weight:700;">MÉDIO</span>',
-                baixo: '<span style="background:rgba(74,222,128,0.15); color:#4ade80; padding:2px 9px; border-radius:10px; font-size:0.72rem; font-weight:700;">EM DIA</span>'
-            };
-
-            tbody.innerHTML = '';
-            usuarios.forEach(u => {
-                const tr = document.createElement('tr');
-                const dias = u.dias_desde_ultimo === null ? '—' : `${u.dias_desde_ultimo} d`;
-                const ritmo = u.ritmo_semanal === null ? '—' : u.ritmo_semanal.toString().replace('.', ',');
-                const esperado = u.esperado_30d === null ? '—' : u.esperado_30d;
-                const saldo = parseFloat(u.balance);
-                const saldoCor = saldo < 0 ? '#f87171' : (saldo > 0 ? '#4ade80' : 'var(--text-muted)');
-                tr.innerHTML = `
-                    <td>${riscoBadge[u.risco] || ''}</td>
-                    <td>${u.name}</td>
-                    <td>${u.matricula}</td>
-                    <td>${u.status}</td>
-                    <td>${dias}</td>
-                    <td>${u.consumos_30d}</td>
-                    <td>${ritmo}</td>
-                    <td>${esperado}</td>
-                    <td style="color:${saldoCor};">R$ ${saldo.toFixed(2).replace('.', ',')}</td>`;
-                tbody.appendChild(tr);
-            });
-        } catch (err) {
-            console.error('Error loading analysis:', err);
-            if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;">Erro ao carregar análise.</td></tr>';
         }
     }
 
